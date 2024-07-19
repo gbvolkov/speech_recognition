@@ -10,7 +10,7 @@ def find_intersections(speakers, texts):
     intersections = []
 
     for text in texts:
-        text_start, text_end = text['start']+0.1, text['end']
+        text_start, text_end = text['start'], text['end']-0.1
         for turn, _, speaker in speakers.itertracks(yield_label=True):
             speaker_start, speaker_end = turn.start, turn.end
             
@@ -35,14 +35,22 @@ def find_intersections(speakers, texts):
 #    "pyannote/speaker-diarization-3.1",
 #    use_auth_token="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")
 
+LOCAL_MODEL = False
+
 def main():
-    TOKEN="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"
+    HF_TOKEN="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"
     AUDIO="audio/2407151757656693.1.0.0.mp3"
     WHISPER_MODEL="medium"
+    if LOCAL_MODEL:
+        DIARIZATION_MODEL="/Users/7810155/Documents/Projects/AI/models/speaker-diarization-3.1/config.yaml"
+        ALIGN_MODEL="/Users/7810155/Documents/Projects/AI/models/wav2vec2-large-xlsr-53-russian/"
+    else:
+        DIARIZATION_MODEL="pyannote/speaker-diarization-3.1"
+        ALIGN_MODEL=None
 
     pipeline = Pipeline.from_pretrained(
-        "/Users/7810155/Documents/Projects/AI/models/speaker-diarization-3.1/config.yaml",
-        use_auth_token=TOKEN)
+        DIARIZATION_MODEL,
+        use_auth_token=HF_TOKEN)
 
     # send pipeline to GPU (when available)
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -69,10 +77,10 @@ def main():
     from whisperx import load_align_model, align
     from whisperx.diarize import assign_word_speakers
 
-    diarization_pipeline = DiarizationPipeline(use_auth_token=TOKEN, model_name='/Users/7810155/Documents/Projects/AI/models/speaker-diarization-3.1/config.yaml')
+    diarization_pipeline = DiarizationPipeline(use_auth_token=HF_TOKEN, model_name=DIARIZATION_MODEL)
     diarized = diarization_pipeline(AUDIO)
     print(diarized)
-    model_a, metadata = load_align_model(language_code=script["language"], device=DEVICE, model_name='/Users/7810155/Documents/Projects/AI/models/wav2vec2-large-xlsr-53-russian/')
+    model_a, metadata = load_align_model(language_code=script["language"], device=DEVICE, model_name=ALIGN_MODEL)
     script_aligned = align(script["segments"], model_a, metadata, AUDIO, DEVICE)
     result_segments, word_seg = list(assign_word_speakers(
         diarized, script_aligned
