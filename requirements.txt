@@ -1,0 +1,9 @@
+--trusted-host pypi.org
+--trusted-host files.pythonhosted.org
+
+openai-whisper
+numpy<2
+pyannote.audio
+onnxruntime
+torch
+git+https://github.com/m-bain/whisperX.git
