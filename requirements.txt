@@ -7,3 +7,4 @@ pyannote.audio
 onnxruntime
 torch
 git+https://github.com/m-bain/whisperX.git
+pypandoc
