@@ -2,6 +2,8 @@ import torch
 import torchaudio
 import whisper
 from pyannote.audio import Pipeline
+
+import textwrap
 import os
 os.environ['CURL_CA_BUNDLE'] = ''
 
@@ -31,59 +33,69 @@ def find_intersections(speakers, texts):
                     })
     return intersections
 
-#pipeline = Pipeline.from_pretrained(
-#    "pyannote/speaker-diarization-3.1",
-#    use_auth_token="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")
-
 LOCAL_MODEL = False
 
-def main():
-    HF_TOKEN="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"
-    AUDIO="audio/audio1097921934.m4a"
-    WHISPER_MODEL="medium"
-    if LOCAL_MODEL:
-        DIARIZATION_MODEL="/Users/7810155/Documents/Projects/AI/models/speaker-diarization-3.1/config.yaml"
-        ALIGN_MODEL="/Users/7810155/Documents/Projects/AI/models/wav2vec2-large-xlsr-53-russian/"
-    else:
-        DIARIZATION_MODEL="pyannote/speaker-diarization-3.1"
-        ALIGN_MODEL=None
 
-    pipeline = Pipeline.from_pretrained(
-        DIARIZATION_MODEL,
-        use_auth_token=HF_TOKEN)
+def merge_speech_segments(segments):
+    merged_segments = []
+    for segment in segments:
+        if merged_segments and segment["speaker"] == merged_segments[-1]["speaker"]:
+            # Extend the end time and append text for the same speaker
+            merged_segments[-1]["end"] = segment["end"]
+            merged_segments[-1]["text"] += " " + segment["text"]
+        else:
+            # Add a new segment if the speaker changes
+            merged_segments.append(segment)
+    return merged_segments
 
-    # send pipeline to GPU (when available)
-    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    pipeline.to(torch.device(DEVICE))
-
-    waveform, sample_rate = torchaudio.load(AUDIO)
-    diarization = pipeline({"waveform": waveform, "sample_rate": sample_rate})
-    for turn, _, speaker in diarization.itertracks(yield_label=True):
-        print(f"start={turn.start:.1f}s stop={turn.end:.1f}s speaker_{speaker}")
-
-
-    model = whisper.load_model(WHISPER_MODEL, )
-    script = model.transcribe(AUDIO), './models'
-
-    for segment in script["segments"]:
-        print(f"{segment['start']:.1f}s - {segment['end']:.1f}s: {segment['text']}")
-
-    intersections = find_intersections(diarization, script["segments"])
-    for segment in intersections:
-        print(f"{segment['start']:.1f}s - {segment['end']:.1f}s: {segment['speaker']}: {segment['text']}")
+def save_speech_to_file_with_indent(segments, filename):
+    with open(filename, "w", encoding="utf-8") as file:
+        for segment in segments:
+            # Format the speaker tag
+            speaker_tag = f"{segment['speaker'].upper()}:\n"
+            
+            # Wrap the text to 128 characters and indent each line
+            wrapped_text = textwrap.fill(segment["text"], width=128, subsequent_indent="    ")
+            
+            # Write the formatted text to the file
+            file.write(speaker_tag)
+            file.write(wrapped_text)
+            file.write("\n\n")  # Add a blank line between speakers
 
 
-    from whisperx.diarize import DiarizationPipeline
-    from whisperx import load_align_model, align
-    from whisperx.diarize import assign_word_speakers
+HF_TOKEN="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"
 
-    diarization_pipeline = DiarizationPipeline(use_auth_token=HF_TOKEN, model_name=DIARIZATION_MODEL)
-    diarized = diarization_pipeline(AUDIO)
+WHISPER_MODEL="medium"
+if LOCAL_MODEL:
+    DIARIZATION_MODEL="/Projects/AI/models/speaker-diarization-3.1/config.yaml"
+    ALIGN_MODEL="/Projects/AI/models/wav2vec2-large-xlsr-53-russian/"
+else:
+    DIARIZATION_MODEL="pyannote/speaker-diarization-3.1"
+    ALIGN_MODEL=None
+
+pipeline = Pipeline.from_pretrained(
+    DIARIZATION_MODEL,
+    use_auth_token=HF_TOKEN)
+# send pipeline to GPU (when available)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+pipeline.to(torch.device(DEVICE))
+
+from whisperx.diarize import DiarizationPipeline
+from whisperx import load_align_model, align
+from whisperx.diarize import assign_word_speakers
+diarization_pipeline = DiarizationPipeline(use_auth_token=HF_TOKEN, model_name=DIARIZATION_MODEL)
+model = whisper.load_model(WHISPER_MODEL, download_root='./models')
+
+
+def transcript(file_name):
+    script = model.transcribe(file_name)
+
+    diarized = diarization_pipeline(file_name)
     print(diarized)
     model_a, metadata = load_align_model(language_code=script["language"], device=DEVICE, model_name=ALIGN_MODEL)
-    script_aligned = align(script["segments"], model_a, metadata, AUDIO, DEVICE)
+    script_aligned = align(script["segments"], model_a, metadata, file_name, DEVICE)
     result_segments, word_seg = list(assign_word_speakers(
-        diarized, script_aligned
+        diarized, script_aligned    
     ).values())
 
     transcribed = []
@@ -97,8 +109,16 @@ def main():
             }
         )
 
-    for start, end, text, speaker in [i.values() for i in transcribed]:
-        print(start, end, speaker, text)
+    merged = merge_speech_segments(transcribed)
+
+    out_file, _ = os.path.splitext(file_name)
+    out_file = f"{out_file}_transcript.txt"
+    save_speech_to_file_with_indent(merged, out_file)
+
 
 if __name__ == "__main__":
-    main()
+    audios=["./audio/audio_2024-11-15_12-20-15.ogg"
+        ,"./audio/2407151757656693.1.0.0.mp3"
+        ,"./audio/audio1097921934.mp3"]
+    for audio in audios:
+        transcript(audio)
