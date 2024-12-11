@@ -39,7 +39,7 @@ LOCAL_MODEL = False
 
 def main():
     HF_TOKEN="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"
-    AUDIO="audio/2407151757656693.1.0.0.mp3"
+    AUDIO="audio/audio1097921934.m4a"
     WHISPER_MODEL="medium"
     if LOCAL_MODEL:
         DIARIZATION_MODEL="/Users/7810155/Documents/Projects/AI/models/speaker-diarization-3.1/config.yaml"
@@ -62,8 +62,8 @@ def main():
         print(f"start={turn.start:.1f}s stop={turn.end:.1f}s speaker_{speaker}")
 
 
-    model = whisper.load_model(WHISPER_MODEL)
-    script = model.transcribe(AUDIO)
+    model = whisper.load_model(WHISPER_MODEL, )
+    script = model.transcribe(AUDIO), './models'
 
     for segment in script["segments"]:
         print(f"{segment['start']:.1f}s - {segment['end']:.1f}s: {segment['text']}")
