@@ -83,8 +83,8 @@ pipeline.to(torch.device(DEVICE))
 from whisperx.diarize import DiarizationPipeline
 from whisperx import load_align_model, align
 from whisperx.diarize import assign_word_speakers
-diarization_pipeline = DiarizationPipeline(use_auth_token=HF_TOKEN, model_name=DIARIZATION_MODEL)
-model = whisper.load_model(WHISPER_MODEL, download_root='./models')
+diarization_pipeline = DiarizationPipeline(use_auth_token=HF_TOKEN, model_name=DIARIZATION_MODEL, device=DEVICE)
+model = whisper.load_model(WHISPER_MODEL, download_root='./models', device=DEVICE)
 
 
 def transcript(file_name):
