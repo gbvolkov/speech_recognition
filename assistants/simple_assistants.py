@@ -118,7 +118,7 @@ if __name__ == '__main__':
 
     args = vars(parser.parse_args())
     mode = args['mode']
-    os.environ['HUGGIN_ACCESS_TOKEN'] = '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'
+    os.environ['HUGGIN_ACCESS_TOKEN'] = 'XXX'
     model_name = 'meta-llama/Llama-3.1-8B-Instruct'
     system_prompt = "Ты внимательный собеседник"
 
