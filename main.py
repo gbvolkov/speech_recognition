@@ -117,8 +117,7 @@ def transcript(file_name):
 
 
 if __name__ == "__main__":
-    audios=["./audio/audio_2024-11-15_12-20-15.ogg"
-        ,"./audio/2407151757656693.1.0.0.mp3"
-        ,"./audio/audio1097921934.mp3"]
+    audios=["./audio/audio1266668284.m4a", "./audio/audio1415011527.m4a", "./audio/audio1499365096.m4a"]
+    
     for audio in audios:
         transcript(audio)
