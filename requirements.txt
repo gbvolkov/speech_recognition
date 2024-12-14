@@ -8,3 +8,10 @@ onnxruntime
 torch
 git+https://github.com/m-bain/whisperX.git
 pypandoc
+
+accelerate>=0.26.0
+transformers
+
+langchain_community
+langchainhub
+langchain-huggingface
