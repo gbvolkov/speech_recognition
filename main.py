@@ -65,7 +65,7 @@ def save_speech_to_file_with_indent(segments, filename):
 
 HF_TOKEN="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"
 
-WHISPER_MODEL="medium"
+WHISPER_MODEL="large"
 if LOCAL_MODEL:
     DIARIZATION_MODEL="/Projects/AI/models/speaker-diarization-3.1/config.yaml"
     ALIGN_MODEL="/Projects/AI/models/wav2vec2-large-xlsr-53-russian/"
