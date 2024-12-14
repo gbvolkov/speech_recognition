@@ -1,7 +1,10 @@
 import torch
-import torchaudio
 import whisper
-from pyannote.audio import Pipeline
+#from pyannote.audio import Pipeline
+
+from whisperx_numpy2_compatibility.diarize import DiarizationPipeline, assign_word_speakers
+from whisperx_numpy2_compatibility import load_align_model, align
+
 
 import textwrap
 import os
@@ -73,16 +76,13 @@ else:
     DIARIZATION_MODEL="pyannote/speaker-diarization-3.1"
     ALIGN_MODEL=None
 
-pipeline = Pipeline.from_pretrained(
-    DIARIZATION_MODEL,
-    use_auth_token=HF_TOKEN)
+#pipeline = Pipeline.from_pretrained(
+#    DIARIZATION_MODEL,
+#    use_auth_token=HF_TOKEN)
 # send pipeline to GPU (when available)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-pipeline.to(torch.device(DEVICE))
+#pipeline.to(torch.device(DEVICE))
 
-from whisperx.diarize import DiarizationPipeline
-from whisperx import load_align_model, align
-from whisperx.diarize import assign_word_speakers
 diarization_pipeline = DiarizationPipeline(use_auth_token=HF_TOKEN, model_name=DIARIZATION_MODEL, device=DEVICE)
 model = whisper.load_model(WHISPER_MODEL, download_root='./models', device=DEVICE)
 
@@ -117,7 +117,7 @@ def transcript(file_name):
 
 
 if __name__ == "__main__":
-    audios=["./audio/audio1266668284.m4a", "./audio/audio1415011527.m4a", "./audio/audio1499365096.m4a"]
+    audios=["./audio/audio1097921934.mp3"]
     
     for audio in audios:
         transcript(audio)

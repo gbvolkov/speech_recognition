@@ -82,8 +82,8 @@ class SimpleAssistantLocal(SimpleAssistant):
         else:
             torch_dtype = torch.float32
             device = "cpu"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        model = AutoModelForCausalLM.from_pretrained(self.model_name, torch_dtype=torch_dtype, trust_remote_code=True, device_map="auto")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_auth_token=os.getenv('HUGGIN_ACCESS_TOKEN'), trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(self.model_name, use_auth_token=os.getenv('HUGGIN_ACCESS_TOKEN'), torch_dtype=torch_dtype, trust_remote_code=True, device_map="auto")
 
         generation_config = GenerationConfig.from_pretrained(self.model_name)
         generation_config.max_new_tokens = 1024
@@ -118,6 +118,7 @@ if __name__ == '__main__':
 
     args = vars(parser.parse_args())
     mode = args['mode']
+    os.environ['HUGGIN_ACCESS_TOKEN'] = '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'
     model_name = 'meta-llama/Llama-3.1-8B-Instruct'
     system_prompt = "Ты внимательный собеседник"
 
