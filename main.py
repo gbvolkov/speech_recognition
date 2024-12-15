@@ -70,8 +70,8 @@ HF_TOKEN="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"
 
 WHISPER_MODEL="large"
 if LOCAL_MODEL:
-    DIARIZATION_MODEL="/Projects/AI/models/speaker-diarization-3.1/config.yaml"
-    ALIGN_MODEL="/Projects/AI/models/wav2vec2-large-xlsr-53-russian/"
+    DIARIZATION_MODEL="/models/speaker-diarization-3.1/config.yaml"
+    ALIGN_MODEL="/models/wav2vec2-large-xlsr-53-russian/"
 else:
     DIARIZATION_MODEL="pyannote/speaker-diarization-3.1"
     ALIGN_MODEL=None

@@ -68,7 +68,7 @@ class SimpleAssistant:
 
 
 class SimpleAssistantLocal(SimpleAssistant):
-    def __init__(self, system_prompt, model_name='models/llama3.1.8b'):
+    def __init__(self, system_prompt, model_name='/models/llama3.1.8b'):
         self.model_name = model_name
         self.max_new_tokens = 2000
         super().__init__(system_prompt)
