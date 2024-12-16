@@ -17,3 +17,5 @@ transformers
 langchain_community
 langchainhub
 langchain-huggingface
+
+git+https://github.com/gbvolkov/AIAssistantsLibPackage.git
