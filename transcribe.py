@@ -101,7 +101,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         delta = zero_start-script['chunks'][0]['timestamp'][0]
 
         for chunk in script['chunks']:
-            start_time, end_time = chunk["timestamp"][0]+delta, chunk["timestamp"][1]+delta
+            #start_time, end_time = chunk["timestamp"][0]-delta, chunk["timestamp"][1]-delta
+            start_time, end_time = chunk["timestamp"][0], chunk["timestamp"][1]
             speaker = "Unknown"
             for turn, _, speaker_label in diarized.itertracks(yield_label=True):
                 if turn.start <= start_time <= turn.end or turn.start <= end_time <= turn.end :
