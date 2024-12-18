@@ -13,7 +13,7 @@ whisperx-numpy2-compatibility
 transformers
 pypandoc
 pyannote.core
-
+pydub
 accelerate>=0.26.0
 transformers
 
