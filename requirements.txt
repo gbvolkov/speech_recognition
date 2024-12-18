@@ -3,6 +3,7 @@
 
 openai-whisper
 numpy
+pandas
 #pyannote.audio
 #onnxruntime
 torch
@@ -11,6 +12,7 @@ whisperx-numpy2-compatibility
 #whisperx
 transformers
 pypandoc
+pyannote.core
 
 accelerate>=0.26.0
 transformers
