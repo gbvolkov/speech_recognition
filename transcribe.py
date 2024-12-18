@@ -88,8 +88,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         #audio, sample_rate = torchaudio.load(file_name, backend='soundfile')
 
         script = whisper_pipe(file_name, return_timestamps='word', generate_kwargs={"language": "russian"})
-        with open('script_2.txt', "w", encoding="utf-8") as f:
-            f.write(script["text"])    
+        #with open('script_2.txt', "w", encoding="utf-8") as f:
+        #    f.write(script["text"])    
         logging.info(f'loaded for {file_name}')
         diarized = diarization_pipeline(file_name, min_speakers=1, max_speakers=9)
         logging.debug(diarized)
