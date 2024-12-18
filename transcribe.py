@@ -95,8 +95,13 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         logging.debug(diarized)
         # Combine results
         speaker_transcription = []
+
+        zero_turn = next(diarized.itertracks(yield_label=True))
+        zero_start, zero_end = zero_turn[0].start, zero_turn[0].end
+        delta = zero_start-script['chunks'][0]['timestamp'][0]
+
         for chunk in script['chunks']:
-            start_time, end_time = chunk["timestamp"][0], chunk["timestamp"][1]
+            start_time, end_time = chunk["timestamp"][0]+delta, chunk["timestamp"][1]+delta
             speaker = "Unknown"
             for turn, _, speaker_label in diarized.itertracks(yield_label=True):
                 if turn.start <= start_time <= turn.end or turn.start <= end_time <= turn.end :
@@ -133,6 +138,7 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
 
 
 def transcribe(audio_name, transcriptor):
+    wav_name = audio_name
     name, ext = os.path.splitext(audio_name)
     ext = ext.replace('.', '')
     btemp = False
@@ -146,6 +152,8 @@ def transcribe(audio_name, transcriptor):
 
 if __name__ == "__main__":
     from pathlib import Path
+
+    logging.basicConfig(level=logging.INFO)
 
     HF_TOKEN="XXXXXX"
 
