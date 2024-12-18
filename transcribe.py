@@ -125,9 +125,7 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
 
         trans_folder = os.path.join(os.path.dirname(file_name), 'transcripts/')
         os.makedirs(trans_folder, exist_ok=True)
-        print(trans_folder)
         trans_file = os.path.join(trans_folder, f"{os.path.splitext(os.path.basename(file_name))[0]}.txt")
-        print(trans_file)
         save_speech_to_file_with_indent(merged, trans_file)
         logging.info(f'<=============Done with {file_name}')
 
