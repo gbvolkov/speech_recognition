@@ -46,20 +46,17 @@ def convert_audio_to_wav(input_file, output_file, audio_type):
     :param output_file: Path where the output MP3 will be saved.
     :param audio_type: Type of audio file.
     """
-    try:
-        # Load the M4A file
-        audio = AudioSegment.from_file(input_file, format=audio_type)
-        # Export as MP3
-        audio.export(output_file, format='wav')#, bitrate=bitrate)
-        
-        print(f"Successfully converted '{input_file}' to '{output_file}'")
-    except Exception as e:
-        print(f"Error converting '{input_file}': {e}")
+    # Load the M4A file
+    audio = AudioSegment.from_file(input_file, format=audio_type)
+    # Export as MP3
+    audio.export(output_file, format='wav')#, bitrate=bitrate)
+    
+    logging.info(f"Successfully converted '{input_file}' to '{output_file}'")
 
 def transcription_factory(whisper_model_id, diarization_model_id, align_model_id=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    print(device)
+    logging.info(device)
 
     #Initializing up wisper pipeline
     whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
