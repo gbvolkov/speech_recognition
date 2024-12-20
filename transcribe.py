@@ -53,6 +53,20 @@ def convert_audio_to_wav(input_file, output_file, audio_type):
     
     logging.info(f"Successfully converted '{input_file}' to '{output_file}'")
 
+def deduplicate(chunked_script):
+    deduplicated = []
+    current_text = ''
+    for chunk in chunked_script:
+        if chunk['text'].strip() != current_text.strip():
+            deduplicated.append(chunk)
+            current_text = chunk['text']
+        elif chunk['timestamp'][0] < deduplicated[-1]['timestamp'][1]:
+            start = min(deduplicated[-1]['timestamp'][0], chunk['timestamp'][0])
+            end = max(deduplicated[-1]['timestamp'][1], chunk['timestamp'][1])
+            deduplicated[-1]['timestamp'] = (start, end)
+    return deduplicated
+
+
 def transcription_factory(whisper_model_id, diarization_model_id, align_model_id=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
@@ -96,16 +110,22 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         # Combine results
         speaker_transcription = []
 
-        zero_turn = next(diarized.itertracks(yield_label=True))
-        zero_start, zero_end = zero_turn[0].start, zero_turn[0].end
-        delta = zero_start-script['chunks'][0]['timestamp'][0]
-
-        for chunk in script['chunks']:
+        pre_chunks = sorted(script['chunks'], key=lambda x: (x['timestamp'][0], x['timestamp'][1]))
+        chunks = deduplicate(pre_chunks)
+        #with open('audio/chunks.txt', "w", encoding="utf-8") as f:
+        #    for chunk in chunks:    
+        #        f.write(f'{chunk["timestamp"][0]}-{chunk["timestamp"][1]}: {chunk["text"]}\n')    
+            
+        for chunk in chunks:
             #start_time, end_time = chunk["timestamp"][0]-delta, chunk["timestamp"][1]-delta
             start_time, end_time = chunk["timestamp"][0], chunk["timestamp"][1]
             speaker = "Unknown"
             for turn, _, speaker_label in diarized.itertracks(yield_label=True):
-                if turn.start <= start_time <= turn.end or turn.start <= end_time <= turn.end :
+                # Find the overlap between the speaker's interval and the text's interval
+                start = max(start_time, turn.start)
+                end = min(end_time, turn.end)
+                #logging.debug(f'{chunk['text']}====>{start}({start_time}):{end}({end_time})')
+                if start <= end:
                     speaker = speaker_label
                     break
             speaker_transcription.append({
