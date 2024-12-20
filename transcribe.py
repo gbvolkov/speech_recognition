@@ -27,7 +27,7 @@ def save_speech_to_file_with_indent(segments, filename):
     with open(filename, "w", encoding="utf-8") as file:
         for segment in segments:
             # Format the speaker tag
-            speaker_tag = f"{segment['start']}-{segment['end']}: {segment['speaker'].upper()}:\n"
+            speaker_tag = f"{segment['speaker'].upper()}:\n"
             
             # Wrap the text to 128 characters and indent each line
             wrapped_text = textwrap.fill(segment["text"], width=128, subsequent_indent="    ")
@@ -52,20 +52,6 @@ def convert_audio_to_wav(input_file, output_file, audio_type):
     audio.export(output_file, format='wav')#, bitrate=bitrate)
     
     logging.info(f"Successfully converted '{input_file}' to '{output_file}'")
-
-
-def deduplicate(chunked_script):
-    deduplicated = []
-    current_text = ''
-    for chunk in chunked_script:
-        if chunk['text'].strip() != current_text.strip():
-            deduplicated.append(chunk)
-            current_text = chunk['text']
-        elif chunk['timestamp'][0] < deduplicated[-1]['timestamp'][1]:
-            start = min(deduplicated[-1]['timestamp'][0], chunk['timestamp'][0])
-            end = max(deduplicated[-1]['timestamp'][1], chunk['timestamp'][1])
-            deduplicated[-1]['timestamp'] = (start, end)
-    return deduplicated
 
 def transcription_factory(whisper_model_id, diarization_model_id, align_model_id=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -102,6 +88,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         #audio, sample_rate = torchaudio.load(file_name, backend='soundfile')
 
         script = whisper_pipe(file_name, return_timestamps='word', generate_kwargs={"language": "russian"})
+        #with open('script_2.txt', "w", encoding="utf-8") as f:
+        #    f.write(script["text"])    
         logging.info(f'loaded for {file_name}')
         diarized = diarization_pipeline(file_name, min_speakers=1, max_speakers=9)
         logging.debug(diarized)
@@ -112,23 +100,12 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         zero_start, zero_end = zero_turn[0].start, zero_turn[0].end
         delta = zero_start-script['chunks'][0]['timestamp'][0]
 
-        pre_chunks = sorted(script['chunks'], key=lambda x: (x['timestamp'][0], x['timestamp'][1]))
-        chunks = deduplicate(pre_chunks)
-        #with open('audio/chunks.txt', "w", encoding="utf-8") as f:
-        #    for chunk in chunks:    
-        #        f.write(f'{chunk["timestamp"][0]}-{chunk["timestamp"][1]}: {chunk["text"]}\n')    
-            
-        for chunk in chunks:
+        for chunk in script['chunks']:
             #start_time, end_time = chunk["timestamp"][0]-delta, chunk["timestamp"][1]-delta
             start_time, end_time = chunk["timestamp"][0], chunk["timestamp"][1]
             speaker = "Unknown"
             for turn, _, speaker_label in diarized.itertracks(yield_label=True):
-                # Find the overlap between the speaker's interval and the text's interval
-                start = max(start_time, turn.start)
-                end = min(end_time, turn.end)
-                #logging.debug(f'{chunk['text']}====>{start}({start_time}):{end}({end_time})')
-                #if turn.start <= start_time <= turn.end or turn.start <= end_time <= turn.end :
-                if start <= end:
+                if turn.start <= start_time <= turn.end or turn.start <= end_time <= turn.end :
                     speaker = speaker_label
                     break
             speaker_transcription.append({
@@ -137,10 +114,9 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
                 "speaker": speaker,
                 "text": chunk["text"]
             })
+        logging.debug(speaker_transcription)
         transcribed = []
-        #with open('audio/segments.txt', "w", encoding="utf-8") as f:
         for segment in speaker_transcription:
-            #f.write(f'{segment["start"]}-{segment["end"]}: {segment["text"]}\n')    
             transcribed.append(
                 {
                     "start": segment["start"],
@@ -149,7 +125,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
                     "speaker": segment["speaker"] if 'speaker' in segment else "ND"
                 }
             )
-    
+        logging.debug(transcribed)
+
         merged = merge_speech_segments(transcribed)
 
         trans_folder = os.path.join(os.path.dirname(file_name), 'transcripts/')
