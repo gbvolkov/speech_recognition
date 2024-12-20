@@ -1,6 +1,8 @@
 /.venv
 /.vscode
 /.vs
+__pycache__/
+**/__pycache__
 /voices
 /audio
 /models
