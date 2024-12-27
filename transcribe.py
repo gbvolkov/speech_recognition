@@ -120,7 +120,7 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
             
         for chunk in chunks:
             #start_time, end_time = chunk["timestamp"][0]-delta, chunk["timestamp"][1]-delta
-            start_time, end_time = chunk["timestamp"][0], chunk["timestamp"][1]
+            start_time, end_time = chunk["timestamp"][0] if chunk["timestamp"][0] is not None else float('inf'), chunk["timestamp"][1] if chunk["timestamp"][1] is not None else float('inf')
             speaker = "Unknown"
             for turn, _, speaker_label in diarized.itertracks(yield_label=True):
                 # Find the overlap between the speaker's interval and the text's interval
