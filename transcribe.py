@@ -108,7 +108,11 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         # Combine results
         speaker_transcription = []
 
-        pre_chunks = sorted(script['chunks'], key=lambda x: (x['timestamp'][0], x['timestamp'][1]))
+        pre_chunks = sorted(script['chunks'], 
+            key=lambda x: (
+                x['timestamp'][0] if x['timestamp'][0] is not None else float('inf'),
+                x['timestamp'][1] if x['timestamp'][1] is not None else float('inf')        
+        ))
         chunks = deduplicate(pre_chunks)
         #with open('audio/chunks.txt', "w", encoding="utf-8") as f:
         #    for chunk in chunks:    
