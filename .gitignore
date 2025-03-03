@@ -7,4 +7,7 @@ __pycache__/
 /audio
 /models
 /.ipynb_checkpoints
+ffmpeg
+ffplay
+ffprobe
 *.exe
