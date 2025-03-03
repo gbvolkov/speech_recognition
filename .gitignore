@@ -10,3 +10,4 @@ __pycache__/
 ffmpeg
 ffplay
 ffprobe
+*.exe
