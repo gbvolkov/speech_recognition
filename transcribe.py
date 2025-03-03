@@ -178,7 +178,9 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    HF_TOKEN="XXXXXX"
+    with open('hf.txt') as f:
+        HF_TOKEN=f.read()
+    #HF_TOKEN="XXXXXX"
 
     diarization_model="pyannote/speaker-diarization-3.1"
     align_model='jonatasgrosman/wav2vec2-large-xlsr-53-russian'
