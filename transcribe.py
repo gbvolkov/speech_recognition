@@ -1,3 +1,27 @@
+import math
+from transformers.models.whisper import tokenization_whisper
+
+# Monkey-patch _find_longest_common_sequence to replace None values with math.nan.
+_original_find_lcs = tokenization_whisper._find_longest_common_sequence
+
+def _patched_find_longest_common_sequence(*args, **kwargs):
+    """
+    Patched version of _find_longest_common_sequence that sanitizes timestamp lists,
+    replacing None with math.nan so that comparisons don't fail.
+    """
+    args = list(args)
+    if len(args) >= 4:
+        # args[2] and args[3] are assumed to be the left and right token timestamp sequences.
+        left_timestamps = args[2]
+        right_timestamps = args[3]
+        args[2] = [ts if ts is not None else math.nan for ts in left_timestamps]
+        args[3] = [ts if ts is not None else math.nan for ts in right_timestamps]
+    return _original_find_lcs(*args, **kwargs)
+
+# Apply the monkey patch.
+tokenization_whisper._find_longest_common_sequence = _patched_find_longest_common_sequence
+
+
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
