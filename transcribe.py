@@ -1,10 +1,14 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 import torch
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 from pyannote.audio import Pipeline
 from pydub import AudioSegment
 
 import textwrap
-import os
 import logging
 
 LOCAL_MODEL = False
@@ -91,7 +95,7 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
     )
 
 
-    diarization_pipeline = Pipeline.from_pretrained(diarization_model_id)
+    diarization_pipeline = Pipeline.from_pretrained(diarization_model_id, use_auth_token=HF_TOKEN)
     if torch.cuda.is_available():
         diarization_pipeline.to(torch.device("cuda"))
 
@@ -177,6 +181,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     logging.basicConfig(level=logging.INFO)
+
 
     with open('hf.txt') as f:
         HF_TOKEN=f.read()
