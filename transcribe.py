@@ -9,6 +9,7 @@ def _patched_find_longest_common_sequence(*args, **kwargs):
     Patched version of _find_longest_common_sequence that sanitizes timestamp lists,
     replacing None with math.nan so that comparisons don't fail.
     """
+    print(f"####PATCH: {len(args)}")
     args = list(args)
     if len(args) >= 4:
         # args[2] and args[3] are assumed to be the left and right token timestamp sequences.
@@ -19,7 +20,7 @@ def _patched_find_longest_common_sequence(*args, **kwargs):
     return _original_find_lcs(*args, **kwargs)
 
 # Apply the monkey patch.
-tokenization_whisper._find_longest_common_sequence = _patched_find_longest_common_sequence
+#tokenization_whisper._find_longest_common_sequence = _patched_find_longest_common_sequence
 
 
 import sys
