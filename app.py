@@ -22,7 +22,7 @@ def transcribe_audio(audio_file):
         os.makedirs(audio_dir)
     
     # Save the uploaded audio file to the server.
-    file_path = os.path.join(audio_dir, audio_file.filename)
+    file_path = os.path.join(audio_dir, f"{uuid.uuid4()}_{audio_file.filename}")
     audio_file.save(file_path)
     
     # Generate a unique job id and mark the job as pending.
