@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Transcription in Progress</title>
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    /* Simple spinner CSS */
+    .spinner {
+      border: 16px solid #f3f3f3;
+      border-top: 16px solid #3498db;
+      border-radius: 50%;
+      width: 120px;
+      height: 120px;
+      animation: spin 2s linear infinite;
+      margin: 50px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <h1>Transcription in Progress</h1>
+  <div class="spinner"></div>
+  <script>
+    function checkStatus(){
+      fetch('/check_status/{{ job_id }}')
+        .then(response => response.json())
+        .then(data => {
+          if(data.status === "completed"){
+            // Once complete, redirect to the editor page with the job id.
+            window.location.href = "/editor?job_id={{ job_id }}";
+          } else {
+            // Continue polling every 2 seconds.
+            setTimeout(checkStatus, 2000);
+          }
+        });
+    }
+    checkStatus();
+  </script>
+</body>
+</html>
