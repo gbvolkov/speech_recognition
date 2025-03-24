@@ -22,4 +22,7 @@ langchain_community
 langchainhub
 langchain-huggingface
 
+flask
+python-docx
+
 #git+https://github.com/gbvolkov/AIAssistantsLibPackage.git

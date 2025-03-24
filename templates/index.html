@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Upload Audio File</title>
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <h1>Upload Audio File for Transcription</h1>
+  <form action="/transcribe" method="post" enctype="multipart/form-data">
+    <input type="file" name="audio_file" accept="audio/*">
+    <input type="submit" value="Upload and Transcribe">
+  </form>
+</body>
+</html>
+    

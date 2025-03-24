@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Transcript Editor</title>
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <h1>Transcript Editor</h1>
+  <form id="editorForm" method="post" action="/download">
+    <textarea id="transcript" name="transcript" rows="20" cols="80">{{ transcript }}</textarea><br>
+    <h3>Rename Speakers</h3>
+    {% for speaker in speakers %}
+      <label>{{ speaker }}: <input type="text" name="{{ speaker }}" placeholder="Enter real name"></label><br>
+    {% endfor %}
+    <button type="button" onclick="applyRename()">Apply Renaming</button>
+    <br><br>
+    <input type="hidden" name="format" id="format" value="markup">
+    <button type="submit" onclick="document.getElementById('format').value='markup';">Download as Markup</button>
+    <button type="submit" onclick="document.getElementById('format').value='word';">Download as Word Doc</button>
+  </form>
+  <script src="{{ url_for('static', filename='js/rename.js') }}"></script>
+</body>
+</html>

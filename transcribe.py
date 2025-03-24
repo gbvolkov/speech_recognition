@@ -3,6 +3,8 @@ from transformers.models.whisper import tokenization_whisper
 
 # Monkey-patch _find_longest_common_sequence to replace None values with math.nan.
 _original_find_lcs = tokenization_whisper._find_longest_common_sequence
+with open('hf.txt') as f:
+    HF_TOKEN=f.read()
 
 def _patched_find_longest_common_sequence(*args, **kwargs):
     """
@@ -51,6 +53,7 @@ def merge_speech_segments(segments):
     return merged_segments
 
 def save_speech_to_file_with_indent(segments, filename):
+    text = ""
     with open(filename, "w", encoding="utf-8") as file:
         for segment in segments:
             # Format the speaker tag
@@ -60,9 +63,11 @@ def save_speech_to_file_with_indent(segments, filename):
             wrapped_text = textwrap.fill(segment["text"], width=128, subsequent_indent="    ")
             
             # Write the formatted text to the file
+            text = text + speaker_tag + wrapped_text + "\n\n"
             file.write(speaker_tag)
             file.write(wrapped_text)
             file.write("\n\n")  # Add a blank line between speakers
+        return text
 
 
 def convert_audio_to_wav(input_file, output_file, audio_type):
@@ -183,8 +188,9 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         trans_folder = os.path.join(os.path.dirname(file_name), 'transcripts/')
         os.makedirs(trans_folder, exist_ok=True)
         trans_file = os.path.join(trans_folder, f"{os.path.splitext(os.path.basename(file_name))[0]}.txt")
-        save_speech_to_file_with_indent(merged, trans_file)
+        text = save_speech_to_file_with_indent(merged, trans_file)
         logging.info(f'<=============Done with {file_name}')
+        return text
 
     return transcript
 
@@ -198,9 +204,24 @@ def transcribe(audio_name, transcriptor):
         wav_name = f"{name}.wav"
         convert_audio_to_wav(audio_name, wav_name, ext)
         btemp = True
-    transcriptor(wav_name)
+        os.remove(audio_name)
+    text = transcriptor(wav_name)
     if btemp:
         os.remove(wav_name)
+    return text
+
+def run_transcription(file_name):
+    from pathlib import Path
+
+    logging.basicConfig(level=logging.INFO)
+
+
+    diarization_model="pyannote/speaker-diarization-3.1"
+    align_model='jonatasgrosman/wav2vec2-large-xlsr-53-russian'
+    whisper_model="openai/whisper-large-v3"
+
+    transcriptor = transcription_factory(whisper_model, diarization_model)
+    return transcribe(file_name, transcriptor)
 
 if __name__ == "__main__":
     from pathlib import Path
