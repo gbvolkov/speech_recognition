@@ -12,3 +12,4 @@ ffplay
 ffprobe
 *.exe
 hf.txt
+nohup.out
