@@ -19,17 +19,31 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+    #timer {
+      text-align: center;
+      font-size: 1.2em;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
   <h1>Transcription in Progress</h1>
   <div class="spinner"></div>
+  <div id="timer">Time elapsed: 0 seconds</div>
   <script>
+    // Timer: update every second.
+    var elapsedSeconds = 0;
+    var timerInterval = setInterval(function(){
+      elapsedSeconds++;
+      document.getElementById("timer").textContent = "Time elapsed: " + elapsedSeconds + " seconds";
+    }, 1000);
+
     function checkStatus(){
       fetch('/check_status/{{ job_id }}')
         .then(response => response.json())
         .then(data => {
           if(data.status === "completed"){
+            clearInterval(timerInterval);
             // Once complete, redirect to the editor page with the job id.
             window.location.href = "/editor?job_id={{ job_id }}";
           } else {
