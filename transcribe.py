@@ -204,7 +204,6 @@ def transcribe(audio_name, transcriptor):
         wav_name = f"{name}.wav"
         convert_audio_to_wav(audio_name, wav_name, ext)
         btemp = True
-        os.remove(audio_name)
     text = transcriptor(wav_name)
     if btemp:
         os.remove(wav_name)
@@ -221,7 +220,18 @@ def run_transcription(file_name):
     whisper_model="openai/whisper-large-v3"
 
     transcriptor = transcription_factory(whisper_model, diarization_model)
-    return transcribe(file_name, transcriptor)
+    transctiption =  transcribe(file_name, transcriptor)
+    
+    full_path = file.resolve()
+    name, ext = os.path.splitext(audio_name)
+
+    done_folder = os.path.join(str(full_path), 'done/')
+    os.makedirs(done_folder, exist_ok=True)
+    done_file = os.path.join(done_folder, f"{os.path.basename(full_path)}")
+    os.rename(str(full_path), done_file)
+    os.remove(audio_name)
+    return transctiption
+
 
 if __name__ == "__main__":
     from pathlib import Path
