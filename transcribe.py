@@ -209,6 +209,18 @@ def transcribe(audio_name, transcriptor):
         os.remove(wav_name)
     return text
 
+def move_to_done(filename):
+    # Define the destination directory
+    dest_dir = './audio/done'
+    # Create the destination directory if it doesn't exist
+    if not os.path.exists(dest_dir):
+        os.makedirs(dest_dir)       
+    # Construct the destination file path
+    dest_path = os.path.join(dest_dir, os.path.basename(filename))
+    os.rename(filename, dest_path)
+   
+
+
 def run_transcription(file_name):
     from pathlib import Path
 
@@ -222,14 +234,7 @@ def run_transcription(file_name):
     transcriptor = transcription_factory(whisper_model, diarization_model)
     transctiption =  transcribe(file_name, transcriptor)
     
-    full_path = file.resolve()
-    name, ext = os.path.splitext(audio_name)
-
-    done_folder = os.path.join(str(full_path), 'done/')
-    os.makedirs(done_folder, exist_ok=True)
-    done_file = os.path.join(done_folder, f"{os.path.basename(full_path)}")
-    os.rename(str(full_path), done_file)
-    os.remove(audio_name)
+    move_to_done(file_name)
     return transctiption
 
 
