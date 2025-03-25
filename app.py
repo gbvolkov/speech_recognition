@@ -2,19 +2,52 @@ import os
 import re
 import uuid
 import threading
+import queue
 from io import BytesIO
 from flask import Flask, render_template, request, make_response, jsonify
 from docx import Document
-
-from transcribe import run_transcription  
-
+from transcribe import run_transcription
 
 app = Flask(__name__)
 
 # Global dictionary to store transcription results
 transcription_jobs = {}
 
-# Updated transcribe_audio function that saves the file, then runs transcription asynchronously.
+# Global queue for transcription jobs
+transcription_queue = queue.Queue()
+
+# Global list and lock for tracking pending job order
+pending_jobs = []
+pending_jobs_lock = threading.Lock()
+
+# Variable and lock for the currently processing job
+current_job = None
+current_job_lock = threading.Lock()
+
+def transcription_worker():
+    global current_job
+    while True:
+        job_id, file_path = transcription_queue.get()
+        # Mark this job as currently processing and remove it from pending list
+        with pending_jobs_lock:
+            if job_id in pending_jobs:
+                pending_jobs.remove(job_id)
+        with current_job_lock:
+            current_job = job_id
+        try:
+            transcript = run_transcription(file_path)
+            transcription_jobs[job_id] = transcript
+        except Exception as e:
+            transcription_jobs[job_id] = f"Error during transcription: {str(e)}"
+        finally:
+            with current_job_lock:
+                current_job = None
+            transcription_queue.task_done()
+
+# Start the worker thread as a daemon
+worker_thread = threading.Thread(target=transcription_worker, daemon=True)
+worker_thread.start()
+
 def transcribe_audio(audio_file):
     # Ensure the 'audio' folder exists.
     audio_dir = "audio"
@@ -25,25 +58,22 @@ def transcribe_audio(audio_file):
     file_path = os.path.join(audio_dir, f"{uuid.uuid4()}_{audio_file.filename}")
     audio_file.save(file_path)
     
-    # Generate a unique job id and mark the job as pending.
+    # Generate a unique job id and mark it as pending.
     job_id = uuid.uuid4().hex
-    transcription_jobs[job_id] = None  # None indicates that transcription is pending.
+    transcription_jobs[job_id] = None  # None indicates pending transcription.
     
-    # Run transcription asynchronously.
-    def async_transcription(job_id, file_path):
-        # Import run_transcription from your module (to be provided later).
-        transcript = run_transcription(file_path)
-        transcription_jobs[job_id] = transcript  # Save the transcript once done.
+    # Add job id to the pending jobs list
+    with pending_jobs_lock:
+        pending_jobs.append(job_id)
     
-    threading.Thread(target=async_transcription, args=(job_id, file_path)).start()
+    # Enqueue the job rather than starting a new thread
+    transcription_queue.put((job_id, file_path))
     return job_id
 
-# Home page remains unchanged.
 @app.route("/", methods=["GET"])
 def index():
     return render_template("index.html")
 
-# The /transcribe route now calls transcribe_audio and then renders a waiting page.
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
     audio_file = request.files.get("audio_file")
@@ -53,15 +83,28 @@ def transcribe():
     job_id = transcribe_audio(audio_file)
     return render_template("waiting.html", job_id=job_id)
 
-# Endpoint for checking the status of the transcription job.
 @app.route("/check_status/<job_id>")
 def check_status(job_id):
+    # Check if the transcription is complete
     transcript = transcription_jobs.get(job_id)
     if transcript is not None:
         return jsonify(status="completed")
-    return jsonify(status="pending")
+    
+    # Otherwise, determine the queue position
+    with current_job_lock:
+        if current_job == job_id:
+            # Currently processing job
+            return jsonify(status="processing", position=1)
+    
+    with pending_jobs_lock:
+        if job_id in pending_jobs:
+            position = pending_jobs.index(job_id) + 1  # 1-based indexing
+            queue_length = len(pending_jobs)
+            return jsonify(status="pending", position=position, queue_length=queue_length)
+    
+    # Fallback if not found in either (could be an error)
+    return jsonify(status="unknown")
 
-# Once transcription is complete, the /editor route loads the transcript.
 @app.route("/editor")
 def editor():
     job_id = request.args.get("job_id")
@@ -69,12 +112,10 @@ def editor():
     if not transcript:
         return "Transcription is still in progress or not found.", 404
 
-    # Extract unique speaker labels (e.g., SPEAKER_00 or UNKNOWN)
     speakers = re.findall(r'(SPEAKER_\d+|UNKNOWN)', transcript)
     speakers = list(set(speakers))
     return render_template("editor.html", transcript=transcript, speakers=speakers)
 
-# Download route remains largely unchanged.
 @app.route("/download", methods=["POST"])
 def download():
     transcript = request.form.get("transcript", "")
