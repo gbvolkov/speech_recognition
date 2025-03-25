@@ -219,8 +219,6 @@ def move_to_done(filename):
     dest_path = os.path.join(dest_dir, os.path.basename(filename))
     os.rename(filename, dest_path)
    
-
-
 def run_transcription(file_name):
     from pathlib import Path
 
