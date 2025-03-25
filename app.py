@@ -98,8 +98,8 @@ def check_status(job_id):
     
     with pending_jobs_lock:
         if job_id in pending_jobs:
-            position = pending_jobs.index(job_id) + 1  # 1-based indexing
-            queue_length = len(pending_jobs)
+            position = pending_jobs.index(job_id) + 2  # 1-based indexing; +1 for current job
+            queue_length = len(pending_jobs)+1
             return jsonify(status="pending", position=position, queue_length=queue_length)
     
     # Fallback if not found in either (could be an error)
