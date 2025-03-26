@@ -1,91 +1,163 @@
 import math
-from transformers.models.whisper import tokenization_whisper
-
-# Monkey-patch _find_longest_common_sequence to replace None values with math.nan.
-_original_find_lcs = tokenization_whisper._find_longest_common_sequence
-with open('hf.txt') as f:
-    HF_TOKEN=f.read()
-
-def _patched_find_longest_common_sequence(*args, **kwargs):
-    """
-    Patched version of _find_longest_common_sequence that sanitizes timestamp lists,
-    replacing None with math.nan so that comparisons don't fail.
-    """
-    print(f"####PATCH: {len(args)}")
-    args = list(args)
-    if len(args) >= 4:
-        # args[2] and args[3] are assumed to be the left and right token timestamp sequences.
-        left_timestamps = args[2]
-        right_timestamps = args[3]
-        args[2] = [ts if ts is not None else math.nan for ts in left_timestamps]
-        args[3] = [ts if ts is not None else math.nan for ts in right_timestamps]
-    return _original_find_lcs(*args, **kwargs)
-
-# Apply the monkey patch.
-#tokenization_whisper._find_longest_common_sequence = _patched_find_longest_common_sequence
-
-
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
 import torch
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
-from pyannote.audio import Pipeline
-from pydub import AudioSegment
-
 import textwrap
 import logging
 
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+from pyannote.audio import Pipeline
+from pydub import AudioSegment
+import torchaudio
+
 LOCAL_MODEL = False
 
-def merge_speech_segments(segments):
-    merged_segments = []
-    for segment in segments:
-        if merged_segments and segment["speaker"] == merged_segments[-1]["speaker"]:
-            # Extend the end time and append text for the same speaker
-            merged_segments[-1]["end"] = segment["end"]
-            merged_segments[-1]["text"] += " " + segment["text"]
+# ---------------------------
+# Forced Alignment Functions
+# ---------------------------
+
+def load_audio_segment(file_name, start_time, end_time, target_sample_rate=16000):
+    """
+    Load a segment of audio from file between start_time and end_time (in seconds)
+    and resample to target_sample_rate if necessary.
+    """
+    waveform, sample_rate = torchaudio.load(file_name)
+    start_sample = int(start_time * sample_rate)
+    end_sample = int(end_time * sample_rate)
+    segment = waveform[:, start_sample:end_sample]
+    if sample_rate != target_sample_rate:
+        resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=target_sample_rate)
+        segment = resampler(segment)
+    return segment, target_sample_rate
+
+def get_trellis(emission, tokens, blank_id=0):
+    """
+    Build a trellis for forced alignment.
+    emission: (num_frames, vocab_size) tensor.
+    tokens: list of token IDs.
+    Returns a trellis tensor of shape (num_frames, len(tokens)+1).
+    """
+    num_frames = emission.size(0)
+    num_tokens = len(tokens)
+    trellis = torch.full((num_frames, num_tokens + 1), -float('inf'), device=emission.device)
+    trellis[0, 0] = 0
+    for t in range(1, num_frames):
+        trellis[t, 0] = trellis[t-1, 0] + emission[t, blank_id]
+    for t in range(1, num_frames):
+        for j in range(1, num_tokens + 1):
+            trellis[t, j] = max(
+                trellis[t-1, j] + emission[t, blank_id],
+                trellis[t-1, j-1] + emission[t, tokens[j-1]]
+            )
+    return trellis
+
+def backtrack(trellis, emission, tokens, blank_id=0):
+    """
+    Backtrack the trellis to recover an alignment path.
+    Returns a list of tuples (frame_index, token_index).
+    """
+    T, J = trellis.shape
+    j = J - 1
+    t = T - 1
+    path = []
+    while t > 0 and j > 0:
+        score = trellis[t, j]
+        score_blank = trellis[t-1, j] + emission[t, blank_id]
+        score_token = trellis[t-1, j-1] + emission[t, tokens[j-1]]
+        if score_token > score_blank:
+            path.append((t, j))
+            t, j = t-1, j-1
         else:
-            # Add a new segment if the speaker changes
-            merged_segments.append(segment)
-    return merged_segments
+            path.append((t, j))
+            t = t-1
+    path.reverse()
+    return path
+
+def merge_repeats(path, transcript_text):
+    """
+    Simplified method to obtain word timings.
+    Evenly distributes the duration of the alignment across words in transcript_text.
+    """
+    words = transcript_text.split()
+    if not path or len(words) == 0:
+        return []
+    start_frame = path[0][0]
+    end_frame = path[-1][0]
+    total_frames = end_frame - start_frame
+    word_duration = total_frames / len(words)
+    aligned_words = []
+    for idx, word in enumerate(words):
+        aligned_words.append({
+            "start": start_frame + idx * word_duration,
+            "end": start_frame + (idx + 1) * word_duration,
+            "text": word
+        })
+    return aligned_words
+
+def forced_align_chunk(chunk, file_name, align_model, align_processor, device):
+    """
+    Perform forced alignment on a single Whisper chunk.
+    Returns a list of word dictionaries with refined "start", "end", and "text".
+    """
+    start_time = chunk["timestamp"][0] if chunk["timestamp"][0] is not None else 0.0
+    end_time = chunk["timestamp"][1] if chunk["timestamp"][1] is not None else 0.0
+    if end_time <= start_time:
+        return []
+    # Load the audio segment for this chunk.
+    audio_segment, sample_rate = load_audio_segment(file_name, start_time, end_time)
+    with torch.inference_mode():
+        audio_segment = audio_segment.to(device)
+        if audio_segment.ndim == 1:
+            audio_segment = audio_segment.unsqueeze(0)
+        emissions = align_model(audio_segment).logits  # shape: (1, frames, vocab_size)
+        emissions = torch.log_softmax(emissions, dim=-1)[0]  # take first element
+    transcript_text = chunk["text"].lower()
+    # Tokenize transcript text using the alignment model's processor.
+    tokens = align_processor.tokenizer(transcript_text, add_special_tokens=False).input_ids
+    blank_id = align_processor.tokenizer.pad_token_id if align_processor.tokenizer.pad_token_id is not None else 0
+    trellis = get_trellis(emissions, tokens, blank_id)
+    path = backtrack(trellis, emissions, tokens, blank_id)
+    aligned_words = merge_repeats(path, transcript_text)
+    num_frames = emissions.size(0)
+    duration = end_time - start_time
+    time_per_frame = duration / num_frames
+    for word in aligned_words:
+        word["start"] = word["start"] * time_per_frame + start_time
+        word["end"] = word["end"] * time_per_frame + start_time
+    return aligned_words
+
+# ---------------------------
+# Transcript Module
+# ---------------------------
 
 def save_speech_to_file_with_indent(segments, filename):
-    text = ""
+    """
+    Save the speaker-attributed transcript to a file with formatted indentation.
+    """
+    text_out = ""
     with open(filename, "w", encoding="utf-8") as file:
         for segment in segments:
-            # Format the speaker tag
             speaker_tag = f"{segment['speaker'].upper()}:\n"
-            
-            # Wrap the text to 128 characters and indent each line
             wrapped_text = textwrap.fill(segment["text"], width=128, subsequent_indent="    ")
-            
-            # Write the formatted text to the file
-            text = text + speaker_tag + wrapped_text + "\n\n"
+            text_out += speaker_tag + wrapped_text + "\n\n"
             file.write(speaker_tag)
             file.write(wrapped_text)
-            file.write("\n\n")  # Add a blank line between speakers
-        return text
-
+            file.write("\n\n")
+    return text_out
 
 def convert_audio_to_wav(input_file, output_file, audio_type):
     """
-    Converts an M4A file to MP3 format.
-
-    :param input_file: Path to the input M4A file.
-    :param output_file: Path where the output MP3 will be saved.
-    :param audio_type: Type of audio file.
+    Converts an audio file to WAV format.
     """
-    # Load the M4A file
     audio = AudioSegment.from_file(input_file, format=audio_type)
-    # Export as MP3
-    audio.export(output_file, format='wav')#, bitrate=bitrate)
-    
+    audio.export(output_file, format='wav')
     logging.info(f"Successfully converted '{input_file}' to '{output_file}'")
 
 def deduplicate(chunked_script):
+    """
+    Deduplicate chunk-level data.
+    """
     deduplicated = []
     current_text = ''
     for chunk in chunked_script:
@@ -98,102 +170,170 @@ def deduplicate(chunked_script):
             deduplicated[-1]['timestamp'] = (start, end)
     return deduplicated
 
+def merge_all_segments_by_speaker(word_list):
+    """
+    Merge all consecutive words with the same speaker into a single segment,
+    regardless of gaps.
+    """
+    merged_segments = []
+    if not word_list:
+        return merged_segments
+    current_seg = {
+        "start": word_list[0]["start"],
+        "end": word_list[0]["end"],
+        "speaker": word_list[0]["speaker"],
+        "text": word_list[0]["text"]
+    }
+    for word in word_list[1:]:
+        if word["speaker"] == current_seg["speaker"]:
+            current_seg["end"] = word["end"]
+            current_seg["text"] += " " + word["text"]
+        else:
+            merged_segments.append(current_seg)
+            current_seg = {
+                "start": word["start"],
+                "end": word["end"],
+                "speaker": word["speaker"],
+                "text": word["text"]
+            }
+    merged_segments.append(current_seg)
+    return merged_segments
 
 def transcription_factory(whisper_model_id, diarization_model_id, align_model_id=None):
+    """
+    Creates a transcription function that uses Whisper for ASR,
+    Pyannote for diarization, and forced alignment via Wav2Vec2 for refining word timestamps.
+    """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    logging.info(device)
+    logging.info(f"Using device: {device}")
 
-    #Initializing up wisper pipeline
+    # Initialize Whisper ASR pipeline.
     whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
         whisper_model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
     )
     whisper_model.config.forced_decoder_ids = None
     whisper_model.to(device)
-    whisper_processor = AutoProcessor.from_pretrained(
-        whisper_model_id
-    )
+    whisper_processor = AutoProcessor.from_pretrained(whisper_model_id)
     whisper_pipe = pipeline(
         "automatic-speech-recognition",
         model=whisper_model,
         tokenizer=whisper_processor.tokenizer,
         feature_extractor=whisper_processor.feature_extractor,
-        chunk_length_s=30,  # Process audio in 30-second chunks
-        stride_length_s=10,  # Optional overlap between chunks    
+        chunk_length_s=30,
+        stride_length_s=10,
         torch_dtype=torch_dtype,
         device=device,
     )
 
-
+    # Initialize Pyannote diarization pipeline.
     diarization_pipeline = Pipeline.from_pretrained(diarization_model_id, use_auth_token=HF_TOKEN)
     if torch.cuda.is_available():
         diarization_pipeline.to(torch.device("cuda"))
 
+    # Load forced alignment model (Wav2Vec2) if provided.
+    if align_model_id is not None:
+        align_processor = Wav2Vec2Processor.from_pretrained(align_model_id)
+        align_model = Wav2Vec2ForCTC.from_pretrained(align_model_id)
+        align_model.to(device)
+    else:
+        align_processor, align_model = None, None
+
     def transcript(file_name):
-        logging.info(f'=============>started with {file_name}')
-        #audio, sample_rate = torchaudio.load(file_name, backend='soundfile')
-
+        logging.info(f'=============> Started transcription for {file_name}')
+        # Obtain Whisper transcript with word-level timestamps.
         script = whisper_pipe(file_name, return_timestamps='word', generate_kwargs={"language": "russian"})
-        #with open('script_2.txt', "w", encoding="utf-8") as f:
-        #    f.write(script["text"])    
-        logging.info(f'loaded for {file_name}')
-        diarized = diarization_pipeline(file_name) #, min_speakers=1, max_speakers=9)
-        logging.debug(diarized)
-        # Combine results
-        speaker_transcription = []
+        logging.info(f"Whisper transcription loaded for {file_name}")
 
-        pre_chunks = sorted(script['chunks'], 
-            key=lambda x: (
-                x['timestamp'][0] if x['timestamp'][0] is not None else float('inf'),
-                x['timestamp'][1] if x['timestamp'][1] is not None else float('inf')        
-        ))
-        chunks = deduplicate(pre_chunks)
-        #with open('audio/chunks.txt', "w", encoding="utf-8") as f:
-        #    for chunk in chunks:    
-        #        f.write(f'{chunk["timestamp"][0]}-{chunk["timestamp"][1]}: {chunk["text"]}\n')    
-            
-        for chunk in chunks:
-            #start_time, end_time = chunk["timestamp"][0]-delta, chunk["timestamp"][1]-delta
-            start_time, end_time = chunk["timestamp"][0] if chunk["timestamp"][0] is not None else float('inf'), chunk["timestamp"][1] if chunk["timestamp"][1] is not None else float('inf')
-            speaker = "Unknown"
+        # Run diarization.
+        diarized = diarization_pipeline(file_name)
+        logging.debug(f"Diarization result: {diarized}")
+
+        # ------------------------------------------
+        # Step 1: Build a refined word-level transcript.
+        # For each chunk, perform forced alignment if available; otherwise, use Whisper's output.
+        # ------------------------------------------
+        word_list = []
+        for chunk in script['chunks']:
+            if align_model is not None:
+                aligned_words = forced_align_chunk(chunk, file_name, align_model, align_processor, device)
+                if aligned_words:
+                    word_list.extend(aligned_words)
+                else:
+                    if "words" in chunk and chunk["words"]:
+                        for w in chunk["words"]:
+                            w_start, w_end = w["timestamp"]
+                            word_list.append({
+                                "start": w_start,
+                                "end": w_end,
+                                "text": w["word"].strip()
+                            })
+                    else:
+                        start_time = chunk["timestamp"][0] if chunk["timestamp"][0] is not None else float('inf')
+                        end_time = chunk["timestamp"][1] if chunk["timestamp"][1] is not None else float('inf')
+                        word_list.append({
+                            "start": start_time,
+                            "end": end_time,
+                            "text": chunk["text"].strip()
+                        })
+            else:
+                if "words" in chunk and chunk["words"]:
+                    for w in chunk["words"]:
+                        w_start, w_end = w["timestamp"]
+                        word_list.append({
+                            "start": w_start,
+                            "end": w_end,
+                            "text": w["word"].strip()
+                        })
+                else:
+                    start_time = chunk["timestamp"][0] if chunk["timestamp"][0] is not None else float('inf')
+                    end_time = chunk["timestamp"][1] if chunk["timestamp"][1] is not None else float('inf')
+                    word_list.append({
+                        "start": start_time,
+                        "end": end_time,
+                        "text": chunk["text"].strip()
+                    })
+        word_list.sort(key=lambda w: w["start"])
+
+        # ------------------------------------------
+        # Step 2: Assign Speaker Labels per Word.
+        # ------------------------------------------
+        for word in word_list:
+            midpoint = (word["start"] + word["end"]) / 2.0
+            assigned_speaker = "Unknown"
             for turn, _, speaker_label in diarized.itertracks(yield_label=True):
-                # Find the overlap between the speaker's interval and the text's interval
-                start = max(start_time, turn.start)
-                end = min(end_time, turn.end)
-                #logging.debug(f'{chunk['text']}====>{start}({start_time}):{end}({end_time})')
-                if start <= end:
-                    speaker = speaker_label
+                if turn.start <= midpoint < turn.end:
+                    assigned_speaker = speaker_label
                     break
-            speaker_transcription.append({
-                "start": start_time,
-                "end": end_time,
-                "speaker": speaker,
-                "text": chunk["text"]
-            })
-        logging.debug(speaker_transcription)
-        transcribed = []
-        for segment in speaker_transcription:
-            transcribed.append(
-                {
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": segment["text"],
-                    "speaker": segment["speaker"] if 'speaker' in segment else "ND"
-                }
-            )
-        logging.debug(transcribed)
+            word["speaker"] = assigned_speaker
 
-        merged = merge_speech_segments(transcribed)
+        # ------------------------------------------
+        # Step 2b: Post-process UNKNOWN words.
+        # Reassign very short UNKNOWN words to the previous known speaker.
+        # ------------------------------------------
+        for i in range(1, len(word_list)):
+            if word_list[i]["speaker"].upper() == "UNKNOWN" and len(word_list[i]["text"]) <= 3:
+                word_list[i]["speaker"] = word_list[i-1]["speaker"]
 
+        # ------------------------------------------
+        # Step 3: Merge consecutive words into segments for each speaker.
+        # Here, continuous speech from the same speaker is joined into one segment.
+        # ------------------------------------------
+        merged_segments = merge_all_segments_by_speaker(word_list)
+        
+        logging.debug(f"Merged speaker segments: {merged_segments}")
+
+        # ------------------------------------------
+        # Step 4: Save the final transcript.
+        # ------------------------------------------
         trans_folder = os.path.join(os.path.dirname(file_name), 'transcripts/')
         os.makedirs(trans_folder, exist_ok=True)
         trans_file = os.path.join(trans_folder, f"{os.path.splitext(os.path.basename(file_name))[0]}.txt")
-        text = save_speech_to_file_with_indent(merged, trans_file)
-        logging.info(f'<=============Done with {file_name}')
-        return text
+        text_out = save_speech_to_file_with_indent(merged_segments, trans_file)
+        logging.info(f'<============= Done with {file_name}')
+        return text_out
 
     return transcript
-
 
 def transcribe(audio_name, transcriptor):
     wav_name = audio_name
@@ -210,62 +350,47 @@ def transcribe(audio_name, transcriptor):
     return text
 
 def move_to_done(filename):
-    # Define the destination directory
     dest_dir = './audio/done'
-    # Create the destination directory if it doesn't exist
     if not os.path.exists(dest_dir):
-        os.makedirs(dest_dir)       
-    # Construct the destination file path
+        os.makedirs(dest_dir)
     dest_path = os.path.join(dest_dir, os.path.basename(filename))
     os.rename(filename, dest_path)
-   
+
 def run_transcription(file_name):
     from pathlib import Path
-
     logging.basicConfig(level=logging.INFO)
 
+    diarization_model = "pyannote/speaker-diarization-3.1"
+    # Use the specified Wav2Vec2 model for forced alignment.
+    align_model = 'jonatasgrosman/wav2vec2-large-xlsr-53-russian'
+    whisper_model = "openai/whisper-large-v3"
 
-    diarization_model="pyannote/speaker-diarization-3.1"
-    align_model='jonatasgrosman/wav2vec2-large-xlsr-53-russian'
-    whisper_model="openai/whisper-large-v3"
-
-    transcriptor = transcription_factory(whisper_model, diarization_model)
-    transctiption =  transcribe(file_name, transcriptor)
-    
+    transcriptor = transcription_factory(whisper_model, diarization_model, align_model_id=align_model)
+    transcription = transcribe(file_name, transcriptor)
     move_to_done(file_name)
-    return transctiption
-
+    return transcription
 
 if __name__ == "__main__":
     from pathlib import Path
-
     logging.basicConfig(level=logging.INFO)
-
-
     with open('hf.txt') as f:
-        HF_TOKEN=f.read()
-    #HF_TOKEN="XXXXXX"
+        HF_TOKEN = f.read()
 
-    diarization_model="pyannote/speaker-diarization-3.1"
-    align_model='jonatasgrosman/wav2vec2-large-xlsr-53-russian'
-    whisper_model="openai/whisper-large-v3"
+    diarization_model = "pyannote/speaker-diarization-3.1"
+    align_model = 'jonatasgrosman/wav2vec2-large-xlsr-53-russian'
+    whisper_model = "openai/whisper-large-v3"
     
-    transcriptor = transcription_factory(whisper_model, diarization_model)
+    transcriptor = transcription_factory(whisper_model, diarization_model, align_model_id=align_model)
 
     folder_path = './audio/'
     AUDIO_EXTENSIONS = {'.mp3', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.aiff', '.wav'}
 
+    from pathlib import Path
     folder = Path(folder_path)
-    # Iterate through all files in the directory (non-recursive)
     for file in folder.iterdir():
         if file.is_file() and file.suffix.lower() in AUDIO_EXTENSIONS:
             full_path = file.resolve()
-            audio_type = file.suffix.lower().replace('.', '')  # e.g., 'mp3'
+            audio_type = file.suffix.lower().replace('.', '')
             logging.info(f"Found audio file: {full_path} (Type: {audio_type})")
-            out_file, _ = os.path.splitext(full_path)
-            out_file = f"{out_file}.wav"        
-            # Call the conversion function
             transcribe(str(full_path), transcriptor)
-
-
-
+            print(f"<============= Done with {full_path}")
