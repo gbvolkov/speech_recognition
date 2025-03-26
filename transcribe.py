@@ -100,15 +100,15 @@ def merge_repeats(path, transcript_text):
 
 def forced_align_chunk(chunk, file_name, align_model, align_processor, device):
     """
-    Perform forced alignment on a single sub-chunk.
+    Perform forced alignment on an entire Whisper chunk.
     Returns a list of word dictionaries with refined "start", "end", and "text".
-    This version processes a sub-chunk defined by chunk["timestamp"] and chunk["text"].
     """
     start_time = chunk["timestamp"][0] if chunk["timestamp"][0] is not None else 0.0
     end_time = chunk["timestamp"][1] if chunk["timestamp"][1] is not None else 0.0
     if end_time <= start_time:
         return []
     audio_segment, sample_rate = load_audio_segment(file_name, start_time, end_time)
+    # Pad if too short
     min_length = 400
     if audio_segment.size(-1) < min_length:
         pad_amount = min_length - audio_segment.size(-1)
@@ -117,7 +117,7 @@ def forced_align_chunk(chunk, file_name, align_model, align_processor, device):
         audio_segment = audio_segment.to(device)
         if audio_segment.ndim == 1:
             audio_segment = audio_segment.unsqueeze(0)
-        emissions = align_model(audio_segment).logits
+        emissions = align_model(audio_segment).logits  # shape: (1, frames, vocab_size)
         emissions = torch.log_softmax(emissions, dim=-1)[0]
     transcript_text = chunk["text"].lower()
     tokens = align_processor.tokenizer(transcript_text, add_special_tokens=False).input_ids
@@ -208,7 +208,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
     """
     Creates a transcription function that uses Whisper for ASR,
     Pyannote for diarization, and forced alignment via Wav2Vec2 for refining word timestamps.
-    This version also splits each Whisper chunk using diarization boundaries.
+    This version performs forced alignment on the entire Whisper chunk,
+    then uses diarization boundaries to assign speaker labels.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
@@ -257,73 +258,42 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
 
         # ------------------------------------------
         # Step 1: Build a refined word-level transcript.
-        # For each Whisper chunk, use diarization boundaries to split the chunk,
-        # then perform forced alignment on each sub-chunk.
+        # For each Whisper chunk, run forced alignment on the entire chunk.
         # ------------------------------------------
         word_list = []
         for chunk in script['chunks']:
-            chunk_start = chunk["timestamp"][0] if chunk["timestamp"][0] is not None else 0.0
-            chunk_end = chunk["timestamp"][1] if chunk["timestamp"][1] is not None else 0.0
-            if chunk_end <= chunk_start:
-                continue
-            # Find all diarization turns overlapping with this chunk.
-            overlapping_turns = []
-            for turn, _, speaker_label in diarized.itertracks(yield_label=True):
-                if turn.end > chunk_start and turn.start < chunk_end:
-                    overlapping_turns.append((turn, speaker_label))
-            if overlapping_turns:
-                for turn, speaker_label in overlapping_turns:
-                    sub_start = max(chunk_start, turn.start)
-                    sub_end = min(chunk_end, turn.end)
-                    # Estimate sub-text by taking a proportional fraction of chunk text.
-                    total_duration = chunk_end - chunk_start
-                    fraction = (sub_end - sub_start) / total_duration if total_duration > 0 else 1.0
-                    words = chunk["text"].split()
-                    num_words = len(words)
-                    num_words_sub = max(1, int(num_words * fraction))
-                    sub_text = " ".join(words[:num_words_sub])
-                    sub_chunk = {"timestamp": (sub_start, sub_end), "text": sub_text}
-                    aligned_words = forced_align_chunk(sub_chunk, file_name, align_model, align_processor, device)
-                    # Tag all words with the diarization speaker label.
-                    for word in aligned_words:
-                        word["speaker"] = speaker_label
-                    word_list.extend(aligned_words)
-            else:
-                # Fallback: process entire chunk.
-                aligned_words = forced_align_chunk(chunk, file_name, align_model, align_processor, device)
-                if aligned_words:
-                    # If no diarization split, assign speaker based on overlap.
-                    for word in aligned_words:
-                        midpoint = (word["start"] + word["end"]) / 2.0
-                        assigned_speaker = "Unknown"
-                        for turn, _, speaker_label in diarized.itertracks(yield_label=True):
-                            if turn.start <= midpoint < turn.end:
-                                assigned_speaker = speaker_label
-                                break
-                        word["speaker"] = assigned_speaker
-                    word_list.extend(aligned_words)
-                else:
-                    # Fallback to Whisper's output.
-                    if "words" in chunk and chunk["words"]:
-                        for w in chunk["words"]:
-                            w_start, w_end = w["timestamp"]
-                            word_list.append({
-                                "start": w_start,
-                                "end": w_end,
-                                "text": w["word"].strip(),
-                                "speaker": "Unknown"
-                            })
-                    else:
-                        word_list.append({
-                            "start": chunk["timestamp"][0],
-                            "end": chunk["timestamp"][1],
-                            "text": chunk["text"].strip(),
-                            "speaker": "Unknown"
+            aligned_words = forced_align_chunk(chunk, file_name, align_model, align_processor, device)
+            # If forced alignment yields no words, fallback to Whisper's word-level output.
+            if not aligned_words:
+                if "words" in chunk and chunk["words"]:
+                    for w in chunk["words"]:
+                        w_start, w_end = w["timestamp"]
+                        aligned_words.append({
+                            "start": w_start,
+                            "end": w_end,
+                            "text": w["word"].strip()
                         })
+                else:
+                    aligned_words.append({
+                        "start": chunk["timestamp"][0],
+                        "end": chunk["timestamp"][1],
+                        "text": chunk["text"].strip()
+                    })
+            # Now, assign speaker labels to each word based on diarization.
+            for word in aligned_words:
+                midpoint = (word["start"] + word["end"]) / 2.0
+                assigned_speaker = "Unknown"
+                for turn, _, speaker_label in diarized.itertracks(yield_label=True):
+                    if turn.start <= midpoint < turn.end:
+                        assigned_speaker = speaker_label
+                        break
+                word["speaker"] = assigned_speaker
+            word_list.extend(aligned_words)
         word_list.sort(key=lambda w: w["start"])
 
         # ------------------------------------------
-        # Step 2: (Optional) Reassign short UNKNOWN words.
+        # Step 2: Post-process short UNKNOWN words.
+        # Reassign very short UNKNOWN words to the previous known speaker.
         # ------------------------------------------
         for i in range(1, len(word_list)):
             if word_list[i]["speaker"].upper() == "UNKNOWN" and len(word_list[i]["text"]) <= 3:
