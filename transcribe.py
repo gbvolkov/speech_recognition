@@ -2,6 +2,7 @@ import math
 import sys
 import os
 import torch
+import torch.nn.functional as F
 import textwrap
 import logging
 
@@ -11,10 +12,10 @@ from pyannote.audio import Pipeline
 from pydub import AudioSegment
 import torchaudio
 
+LOCAL_MODEL = False
 with open('hf.txt') as f:
     HF_TOKEN=f.read()
     
-LOCAL_MODEL = False
 
 # ---------------------------
 # Forced Alignment Functions
@@ -109,6 +110,11 @@ def forced_align_chunk(chunk, file_name, align_model, align_processor, device):
         return []
     # Load the audio segment for this chunk.
     audio_segment, sample_rate = load_audio_segment(file_name, start_time, end_time)
+    # Pad the audio segment if it's too short (e.g. less than 400 samples)
+    min_length = 400
+    if audio_segment.size(-1) < min_length:
+        pad_amount = min_length - audio_segment.size(-1)
+        audio_segment = F.pad(audio_segment, (0, pad_amount))
     with torch.inference_mode():
         audio_segment = audio_segment.to(device)
         if audio_segment.ndim == 1:
@@ -116,7 +122,6 @@ def forced_align_chunk(chunk, file_name, align_model, align_processor, device):
         emissions = align_model(audio_segment).logits  # shape: (1, frames, vocab_size)
         emissions = torch.log_softmax(emissions, dim=-1)[0]  # take first element
     transcript_text = chunk["text"].lower()
-    # Tokenize transcript text using the alignment model's processor.
     tokens = align_processor.tokenizer(transcript_text, add_special_tokens=False).input_ids
     blank_id = align_processor.tokenizer.pad_token_id if align_processor.tokenizer.pad_token_id is not None else 0
     trellis = get_trellis(emissions, tokens, blank_id)
@@ -175,8 +180,7 @@ def deduplicate(chunked_script):
 
 def merge_all_segments_by_speaker(word_list):
     """
-    Merge all consecutive words with the same speaker into a single segment,
-    regardless of gaps.
+    Merge all consecutive words with the same speaker into a single segment.
     """
     merged_segments = []
     if not word_list:
