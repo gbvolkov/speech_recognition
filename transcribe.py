@@ -11,6 +11,9 @@ from pyannote.audio import Pipeline
 from pydub import AudioSegment
 import torchaudio
 
+with open('hf.txt') as f:
+    HF_TOKEN=f.read()
+    
 LOCAL_MODEL = False
 
 # ---------------------------
