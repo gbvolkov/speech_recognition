@@ -13,3 +13,4 @@ ffprobe
 *.exe
 hf.txt
 nohup.out
+/data

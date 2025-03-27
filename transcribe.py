@@ -146,7 +146,48 @@ def refine_boundary(boundary_time, file_name, delta, text_prev, text_next, align
         return boundary_time
     last_prev_end = aligned_words[num_prev - 1]["end"]
     first_next_start = aligned_words[num_prev]["start"]
-    return (last_prev_end + first_next_start) / 2.0
+    refined = (last_prev_end + first_next_start) / 2.0
+    return refined
+
+def adjust_boundaries(word_list, file_name, delta, align_model, align_processor, device):
+    """
+    Detect boundaries where the speaker changes.
+    For each such boundary, extract a window around the boundary,
+    run forced alignment to compute a refined boundary, and then propagate the offset to all subsequent words.
+    """
+    # We assume word_list is sorted by start.
+    cumulative_offset = 0.0
+    for i in range(1, len(word_list)):
+        # Always update the current word by the cumulative offset.
+        word_list[i]["start"] += cumulative_offset
+        word_list[i]["end"] += cumulative_offset
+        # Check if there is a speaker change.
+        if word_list[i]["speaker"] != word_list[i-1]["speaker"]:
+            # Original boundary is at the current word's start.
+            original_boundary = word_list[i]["start"]
+            # Define a window: from 0.5 sec before the end of previous word to 0.5 sec after current word's start.
+            window_start = max(0, word_list[i-1]["end"] - delta)
+            window_end = word_list[i]["start"] + delta
+            # Use the last 2 words from the previous block and the first 2 words from the current block.
+            prev_text = " ".join(word_list[i-1]["text"].split()[-2:]) if word_list[i-1]["text"] else ""
+            next_text = " ".join(word_list[i]["text"].split()[:2]) if word_list[i]["text"] else ""
+            sub_text = prev_text + " " + next_text
+            sub_chunk = {"timestamp": (window_start, window_end), "text": sub_text}
+            aligned_words = forced_align_chunk(sub_chunk, file_name, align_model, align_processor, device)
+            if aligned_words and len(aligned_words) > 0:
+                # Use the midpoint between the last word of the previous part and first word of the next part.
+                num_prev = len(prev_text.split())
+                if num_prev > 0 and num_prev < len(aligned_words):
+                    refined_boundary = (aligned_words[num_prev-1]["end"] + aligned_words[num_prev]["start"]) / 2.0
+                    offset = refined_boundary - original_boundary
+                    cumulative_offset += offset
+                    # Propagate offset to current and subsequent words.
+                    word_list[i]["start"] += offset
+                    word_list[i]["end"] += offset
+                    for j in range(i+1, len(word_list)):
+                        word_list[j]["start"] += offset
+                        word_list[j]["end"] += offset
+    return word_list
 
 # ---------------------------
 # Transcript Module
@@ -226,14 +267,15 @@ def merge_all_segments_by_speaker(segments):
 def transcription_factory(whisper_model_id, diarization_model_id, align_model_id=None):
     """
     Creates a transcription function that uses Whisper for ASR,
-    Pyannote for diarization, and forced alignment via Wav2Vec2 to refine only boundaries.
+    Pyannote for diarization, and forced alignment via Wav2Vec2 to refine boundaries.
     
     Process:
       1. Extract word-based segments from Whisper (using provided "words").
-      2. Group words into speaker blocks using diarization boundaries.
-         (If the very first word(s) fall before any diarization turn, assign them to the first turn's speaker.)
-      3. Refine boundaries between adjacent blocks with different speakers using forced alignment on a small window.
-      4. Merge blocks into segments, and then rejoin adjacent segments with the same speaker.
+      2. Assign speaker labels to each word based on diarization turns.
+      3. Adjust boundaries: when a speaker change is detected, extract a short window (±delta seconds) around the change,
+         run forced alignment to compute a refined boundary, and propagate the offset to all subsequent words.
+      4. Merge consecutive words with the same speaker into segments.
+      5. Rejoin adjacent segments with the same speaker.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
@@ -262,7 +304,7 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
     if torch.cuda.is_available():
         diarization_pipeline.to(torch.device("cuda"))
 
-    # Load forced alignment model (Wav2Vec2) if provided.
+    # Load forced alignment model (Wav2Vec2) for boundary refinement.
     if align_model_id is not None:
         align_processor = Wav2Vec2Processor.from_pretrained(align_model_id)
         align_model = Wav2Vec2ForCTC.from_pretrained(align_model_id)
@@ -278,10 +320,16 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
 
         # Run diarization.
         diarized = diarization_pipeline(file_name)
-        logging.debug(f"Diarization result: {diarized}")
+        # After obtaining the diarization turns:
+        turns = list(diarized.itertracks(yield_label=True))
+        # Filter out turns with a duration below the threshold
+        min_turn_duration = 0.2  # seconds
+        #turns = [t for t in turns if (t[0].end - t[0].start) >= min_turn_duration]
+        turns.sort(key=lambda t: t[0].start)
+        logging.debug(f"Filtered diarization turns: {turns}")
 
         # ------------------------------------------
-        # Step 1: Build a full word-level transcript using Whisper words.
+        # Step 1: Build full word-level transcript using Whisper words.
         # ------------------------------------------
         word_list = []
         for chunk in script['chunks']:
@@ -302,77 +350,67 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         word_list.sort(key=lambda w: w["start"])
 
         # ------------------------------------------
-        # Step 2: Form speaker blocks using diarization.
-        # For each diarization turn, select all words whose midpoints fall within it.
-        # If the very first word(s) occur before any diarization turn, assign them to the first turn's speaker.
+        # Step 2: Assign speaker labels to each word.
+        # For each word, if its midpoint is before the start of the first diarization turn,
+        # assign the speaker of the first turn; otherwise, assign the speaker from the last turn that started before the word's midpoint.
         # ------------------------------------------
-        blocks = []
-        turns = list(diarized.itertracks(yield_label=True))
         if turns:
-            first_turn_start = min(turn.start for turn, _, _ in turns)
-            first_turn_speaker = turns[0][2]
-            if word_list and word_list[0]["start"] < first_turn_start:
-                initial_words = [w for w in word_list if w["start"] < first_turn_start]
-                if initial_words:
-                    blocks.append({
-                        "speaker": first_turn_speaker,
-                        "start": min(w["start"] for w in initial_words),
-                        "end": max(w["end"] for w in initial_words),
-                        "words": initial_words
-                    })
-        for turn, _, speaker_label in turns:
-            block_words = [w for w in word_list if turn.start <= (w["start"] + w["end"]) / 2.0 < turn.end]
-            if block_words:
-                block = {
-                    "speaker": speaker_label,
-                    "start": min(w["start"] for w in block_words),
-                    "end": max(w["end"] for w in block_words),
-                    "words": block_words
-                }
-                blocks.append(block)
-        blocks.sort(key=lambda b: b["start"])
+            first_turn_start = turns[0][0].start
+        for w in word_list:
+            midpoint = (w["start"] + w["end"]) / 2.0
+            if turns and midpoint < first_turn_start:
+                w["speaker"] = turns[0][2]
+            else:
+                candidate = None
+                for turn, _, speaker_label in turns:
+                    if turn.start <= midpoint < turn.end:
+                        candidate = speaker_label
+                        break
+                    elif turn.start <= midpoint:
+                        candidate = speaker_label
+                w["speaker"] = candidate if candidate is not None else "Unknown"
 
-        # Merge adjacent blocks from the same speaker if gap is small.
-        gap_threshold = 3.0  # seconds
-        merged_blocks = []
-        if blocks:
-            current = blocks[0]
-            for block in blocks[1:]:
-                if block["speaker"] == current["speaker"] and (block["start"] - current["end"]) < gap_threshold:
-                    current["end"] = block["end"]
-                    current["words"].extend(block["words"])
+
+        # ------------------------------------------
+        # Step 3: Adjust boundaries using forced alignment at speaker changes.
+        # When a speaker change is detected, adjust the boundary and propagate the offset.
+        # ------------------------------------------
+        delta = 0.5  # seconds window for forced alignment
+        word_list = adjust_boundaries(word_list, file_name, delta, align_model, align_processor, device)
+
+        # ------------------------------------------
+        # Step 4: Merge consecutive words with the same speaker into segments.
+        # ------------------------------------------
+        segments = []
+        if word_list:
+            current_seg = {
+                "speaker": word_list[0]["speaker"],
+                "start": word_list[0]["start"],
+                "end": word_list[0]["end"],
+                "text": word_list[0]["text"]
+            }
+            for w in word_list[1:]:
+                if w["speaker"] == current_seg["speaker"]:
+                    current_seg["end"] = w["end"]
+                    current_seg["text"] += " " + w["text"]
                 else:
-                    merged_blocks.append(current)
-                    current = block
-            merged_blocks.append(current)
-        else:
-            merged_blocks = blocks
+                    segments.append(current_seg)
+                    current_seg = {
+                        "speaker": w["speaker"],
+                        "start": w["start"],
+                        "end": w["end"],
+                        "text": w["text"]
+                    }
+            segments.append(current_seg)
 
         # ------------------------------------------
-        # Step 3: Refine boundaries between adjacent blocks.
-        # For each pair of adjacent blocks with different speakers, refine the boundary.
+        # Step 5: Final rejoin - merge adjacent segments with the same speaker.
         # ------------------------------------------
-        delta = 0.5  # seconds window
-        for i in range(len(merged_blocks) - 1):
-            if merged_blocks[i]["speaker"] != merged_blocks[i+1]["speaker"]:
-                # Use last two words from block i and first two from block i+1.
-                text_prev = " ".join([w["text"] for w in merged_blocks[i]["words"][-2:]])
-                text_next = " ".join([w["text"] for w in merged_blocks[i+1]["words"][:2]])
-                boundary_time = merged_blocks[i]["end"]
-                refined_boundary = refine_boundary(boundary_time, file_name, delta, text_prev, text_next, align_model, align_processor, device)
-                merged_blocks[i]["end"] = refined_boundary
-                merged_blocks[i+1]["start"] = refined_boundary
-
-        # ------------------------------------------
-        # Step 4: Merge each block's words into a segment.
-        # ------------------------------------------
-        segments = merge_blocks(merged_blocks)
-        # Final rejoin: merge adjacent segments with the same speaker.
         final_segments = merge_all_segments_by_speaker(segments)
         logging.debug(f"Merged speaker segments: {final_segments}")
 
         # ------------------------------------------
-        # Step 5: Save final transcript.
+        # Step 6: Save final transcript.
         # ------------------------------------------
         trans_folder = os.path.join(os.path.dirname(file_name), 'transcripts/')
         os.makedirs(trans_folder, exist_ok=True)
