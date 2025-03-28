@@ -1,14 +1,15 @@
 function applyRename(){
-    var transcriptElem = document.getElementById("transcript");
-    var transcriptText = transcriptElem.value;
+    // Get the current HTML content from the Quill editor.
+    var htmlContent = quill.root.innerHTML;
     var inputs = document.querySelectorAll('input[type="text"]');
     inputs.forEach(function(input) {
         var oldName = input.name;
         var newName = input.value;
         if(newName){
             var regex = new RegExp(oldName, "g");
-            transcriptText = transcriptText.replace(regex, newName);
+            htmlContent = htmlContent.replace(regex, newName);
         }
     });
-    transcriptElem.value = transcriptText;
+    // Update the Quill editor with the renamed content.
+    quill.root.innerHTML = htmlContent;
 }

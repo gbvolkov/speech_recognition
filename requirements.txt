@@ -17,6 +17,7 @@ pyannote.audio
 pydub
 accelerate>=0.26.0
 transformers==4.46
+pysbd
 
 langchain_community
 langchainhub
@@ -24,8 +25,8 @@ langchain-huggingface
 
 flask
 python-docx
+html2text
 
 #silero_vad
 #razdel
-pysbd
 #git+https://github.com/gbvolkov/AIAssistantsLibPackage.git

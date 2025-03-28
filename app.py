@@ -7,6 +7,7 @@ from io import BytesIO
 from flask import Flask, render_template, request, make_response, jsonify
 from docx import Document
 from transcribe import run_transcription
+import html2text  # For HTML-to-Markdown conversion
 
 # Allowed audio file extensions
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'm4a', 'flac'}
@@ -121,31 +122,98 @@ def create_app():
         if not transcript:
             return "Transcription is still in progress or not found.", 404
 
+        def preformat_transcript(text):
+            import re
+            # Collapse multiple newline characters into one.
+            text = re.sub(r'\n+', '\n', text)
+            
+            # Pattern to match a speaker followed by a timestamp (and an optional colon)
+            pattern = re.compile(
+                r'(?P<speaker>[^\[\]\n:]+?)\s*'
+                r'(?P<time>\[\d{2}:\d{2}:\d{2}\s*-\s*\d{2}:\d{2}:\d{2}\])'
+                r'(?P<colon>:?)'
+            )
+            def replacer(match):
+                speaker = match.group('speaker').strip()
+                time = match.group('time').strip()
+                colon = match.group('colon')
+                return f"<b>{speaker}</b> <i>{time}</i>{colon}"
+            formatted_text = pattern.sub(replacer, text)
+            
+            # Instead of replacing newlines with <br/>, wrap each non-empty line in <p> tags.
+            lines = formatted_text.split("\n")
+            paragraphs = [f"<p>{line.strip()}</p>" for line in lines if line.strip()]
+            return "".join(paragraphs)
+        
+        formatted_transcript = preformat_transcript(transcript)
+        # Extract speakers for renaming (if needed)
+        import re
         speakers = re.findall(r'(SPEAKER_\d+|UNKNOWN)', transcript)
         speakers = list(set(speakers))
-        return render_template("editor.html", transcript=transcript, speakers=speakers)
+        return render_template("editor.html", transcript=formatted_transcript, speakers=speakers)
+
+
 
     @app.route("/download", methods=["POST"])
     def download():
-        transcript = request.form.get("transcript", "")
+        # Expecting HTML content from the WYSIWYG editor
+        html = request.form.get("html_content", "")
         format_type = request.form.get("format", "markup")
         
         if format_type == "word":
-            document = Document()
-            document.add_paragraph(transcript)
-            file_stream = BytesIO()
-            document.save(file_stream)
-            file_stream.seek(0)
-            response = make_response(file_stream.read())
-            response.headers["Content-Disposition"] = "attachment; filename=transcript.docx"
-            response.mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            try:
+                import pypandoc
+                import tempfile
+                import os
+
+                # Pre-process HTML: convert newline characters to <br/> tags
+                # This ensures that line feeds are represented in the HTML passed to Pandoc.
+                if "\n" in html:
+                    html = html.replace("\n", "<br/>")
+
+                # Create a temporary file with delete=False and close it immediately
+                tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+                tmp_name = tmp.name
+                tmp.close()  # Close so that Pandoc can write to it
+                
+                # Convert HTML to DOCX by writing to the temporary file
+                pypandoc.convert_text(html, to='docx', format='html', outputfile=tmp_name)
+                
+                # Read back the file contents
+                with open(tmp_name, 'rb') as f:
+                    docx_data = f.read()
+                
+                # Remove the temporary file
+                os.unlink(tmp_name)
+                
+                response = make_response(docx_data)
+                response.headers["Content-Disposition"] = "attachment; filename=transcript.docx"
+                response.mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            except ImportError:
+                # Fallback: Save as plain text using python-docx if pypandoc is not installed.
+                from docx import Document
+                from io import BytesIO
+                document = Document()
+                document.add_paragraph(html)
+                file_stream = BytesIO()
+                document.save(file_stream)
+                file_stream.seek(0)
+                response = make_response(file_stream.read())
+                response.headers["Content-Disposition"] = "attachment; filename=transcript.docx"
+                response.mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         else:
+            import html2text
+            # Convert HTML to Markdown while preserving basic formatting
+            markdown_text = html2text.html2text(html)
             filename = "transcript.md"
-            response = make_response(transcript)
+            response = make_response(markdown_text)
             response.headers["Content-Disposition"] = f"attachment; filename={filename}"
             response.mimetype = "text/markdown"
         
         return response
+
+
+
 
     return app
 
