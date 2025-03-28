@@ -277,7 +277,28 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
             else:
                 real_speaker = seg.get("speaker", "Unknown")
             seg["speaker"] = real_speaker
-        
+       
+       # Merge consecutive segments with the same REAL_SPEAKER into one block.
+        merged_final_segments = []
+        if final_segments:
+            # Ensure final_segments are sorted by start time.
+            final_segments.sort(key=lambda seg: seg["start"])
+            current_seg = final_segments[0]
+            for seg in final_segments[1:]:
+                if seg["speaker"] == current_seg["speaker"]:
+                    # Extend the current segment.
+                    current_seg["end"] = seg["end"]
+                    current_seg["text"] += " " + seg["text"]
+                    # Optionally, merge the diarized_segments.
+                    current_seg["diarized_segments"].extend(seg["diarized_segments"])
+                else:
+                    merged_final_segments.append(current_seg)
+                    current_seg = seg
+            merged_final_segments.append(current_seg)
+
+        # Replace final_segments with the merged segments.
+        final_segments = merged_final_segments
+
         trans_folder = os.path.join(os.path.dirname(file_name), 'transcripts/')
         os.makedirs(trans_folder, exist_ok=True)
         trans_file = os.path.join(trans_folder, f"{os.path.splitext(os.path.basename(file_name))[0]}.txt")
