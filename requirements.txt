@@ -26,6 +26,7 @@ langchain-huggingface
 flask
 python-docx
 html2text
+html2docx
 
 #silero_vad
 #razdel

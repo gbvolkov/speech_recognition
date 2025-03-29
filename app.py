@@ -152,8 +152,6 @@ def create_app():
         speakers = list(set(speakers))
         return render_template("editor.html", transcript=formatted_transcript, speakers=speakers)
 
-
-
     @app.route("/download", methods=["POST"])
     def download():
         # Expecting HTML content from the WYSIWYG editor
@@ -161,46 +159,21 @@ def create_app():
         format_type = request.form.get("format", "markup")
         
         if format_type == "word":
-            try:
-                import pypandoc
-                import tempfile
-                import os
+            # Use html2docx for pure Python conversion of HTML to DOCX.
+            from html2docx import html2docx
+            from io import BytesIO
 
-                # Pre-process HTML: convert newline characters to <br/> tags
-                # This ensures that line feeds are represented in the HTML passed to Pandoc.
-                if "\n" in html:
-                    html = html.replace("\n", "<br/>")
-
-                # Create a temporary file with delete=False and close it immediately
-                tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
-                tmp_name = tmp.name
-                tmp.close()  # Close so that Pandoc can write to it
-                
-                # Convert HTML to DOCX by writing to the temporary file
-                pypandoc.convert_text(html, to='docx', format='html', outputfile=tmp_name)
-                
-                # Read back the file contents
-                with open(tmp_name, 'rb') as f:
-                    docx_data = f.read()
-                
-                # Remove the temporary file
-                os.unlink(tmp_name)
-                
-                response = make_response(docx_data)
-                response.headers["Content-Disposition"] = "attachment; filename=transcript.docx"
-                response.mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            except ImportError:
-                # Fallback: Save as plain text using python-docx if pypandoc is not installed.
-                from docx import Document
-                from io import BytesIO
-                document = Document()
-                document.add_paragraph(html)
-                file_stream = BytesIO()
-                document.save(file_stream)
-                file_stream.seek(0)
-                response = make_response(file_stream.read())
-                response.headers["Content-Disposition"] = "attachment; filename=transcript.docx"
-                response.mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            # Convert HTML to a python-docx Document object.
+            document = html2docx(html, title="Transcript")
+            # Save the document to an in-memory bytes buffer.
+            #file_stream = BytesIO()
+            #document.save(file_stream)
+            #file_stream.seek(0)
+            docx_data = document.getvalue()
+            
+            response = make_response(docx_data)
+            response.headers["Content-Disposition"] = "attachment; filename=transcript.docx"
+            response.mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         else:
             import html2text
             # Convert HTML to Markdown while preserving basic formatting
@@ -211,9 +184,6 @@ def create_app():
             response.mimetype = "text/markdown"
         
         return response
-
-
-
 
     return app
 

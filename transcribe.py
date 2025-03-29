@@ -21,6 +21,15 @@ import pysbd
 
 LOCAL_MODEL = False
 
+import gc
+import torch
+
+def cleanup_gpu_memory():
+    """Clean up GPU memory by running garbage collection and clearing CUDA cache."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
 def format_timestamp(seconds):
     """
     Format seconds into HH:MM:SS string.
@@ -290,6 +299,8 @@ def transcribe(audio_name, transcriptor):
     text = transcriptor(wav_name)
     if btemp:
         os.remove(wav_name)
+    # Clean up GPU memory after processing each file.
+    cleanup_gpu_memory()
     return text
 
 def move_to_done(filename):
