@@ -6,92 +6,79 @@
     background: none;          /* Remove background if desired */
     border: none;              /* Remove border if desired */
     padding: 0;                /* Remove extra padding if desired */
-  }
-  
-  /* Quill editor container */
-  #editor-container {
+}
+
+/* Quill editor container */
+#editor-container {
     width: 100%;       /* Fill the entire width of #editorForm */
     height: 60vh;      /* Editor height is 60% of the viewport */
     border: 1px solid #ccc;
     margin-bottom: 10px;
-  }
+}
   
-  /* Flex container to separate rename (left) and download (right) */
-  .editor-actions {
+/* Flex container to separate rename (left) and download (right) */
+.editor-actions {
     display: flex;
     width: 100%;
     margin-bottom: 20px;
     justify-content: space-between;
     align-items: center;
-  }
+}
   
-  /* Left side: rename button */
-  .left-actions {
+/* Left side: rename button */
+.left-actions {
     display: flex;
     align-items: center;
-  }
+}
   
-  /* Right side: download buttons */
-  .right-actions {
+/* Right side: download buttons */
+.right-actions {
     display: flex;
     align-items: center;
-  }
+}
   
-  /* Icon buttons */
-  .download-btn {
+/* Icon buttons */
+.download-btn {
     width: 60px;
     height: 60px;
     border: none;
     background: none;
     cursor: pointer;
     margin: 5px;
-  }
+}
   
-  /* Ensure images inside buttons fit properly and apply main color filter */
-  .download-btn img {
+/* Ensure images inside buttons fit properly and apply main color filter */
+.download-btn img {
     width: 100%;
     height: 100%;
     object-fit: contain;
     /* Filter for converting a black icon to #ec6707 */
     filter: brightness(0) saturate(100%) invert(32%) sepia(74%) saturate(3600%) hue-rotate(355deg) brightness(102%) contrast(104%);
-  }
-  
-  /* Modal styling */
-  .modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    overflow: auto; /* Scroll if content is taller than screen */
-    background-color: rgba(0, 0, 0, 0.4);
-  }
-  
-  .modal-content {
-    background-color: #fefefe;
-    margin: 10% auto;
-    padding: 20px;
-    border: 1px solid #888;
-    width: 80%;
-    max-width: 400px;
-    position: relative;
-    border-radius: 5px;
-  }
-  
-  .close {
-    color: #aaa;
-    position: absolute;
-    right: 15px;
-    top: 10px;
-    font-size: 28px;
-    font-weight: bold;
-    cursor: pointer;
-  }
-  .close:hover,
-  .close:focus {
-    color: #000;
-    text-decoration: none;
-  }
-  
+}
+
+/* Slider sidebar styling */
+.rename-sidebar {
+  position: fixed; /* Adjust as needed; fixed or absolute depending on layout */
+  top: 0;
+  right: -300px; /* Hidden by default */
+  width: 300px;
+  height: 100%;
+  background-color: #fefefe;
+  border-left: 1px solid #ccc;
+  padding: 20px;
+  box-shadow: -2px 0 5px rgba(0,0,0,0.1);
+  transition: right 0.3s ease;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+/* When visible, slide in */
+.rename-sidebar.active {
+  right: 0;
+}
+
+/* Adjust form styling if needed */
+.rename-sidebar h3 {
+  text-align: center;
+  margin-bottom: 15px;
+}
