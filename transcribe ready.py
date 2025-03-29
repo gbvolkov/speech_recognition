@@ -30,11 +30,11 @@ def format_timestamp(seconds):
     s = int(seconds % 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
 
-def merge_chunks_into_sentences(chunks):
+def merge_chunks_into_sentences(chunks, allow_cross_speaker_merge=True, cross_speaker_gap_threshold=0.3):
     """
     Merge consecutive transcription chunks into longer segments using heuristics.
-    This version does not use any speaker information.
-    Merging is based solely on temporal proximity and punctuation (i.e. if the current text does not end with a sentence-terminator).
+    Instead of finalizing speaker assignment here, we accumulate each chunk's duration per speaker.
+    The merged segment retains a "speakers" dict that maps speaker -> total duration.
     """
     if not chunks:
         return []
@@ -44,27 +44,31 @@ def merge_chunks_into_sentences(chunks):
     current_segment = None
 
     for chunk in chunks:
+        chunk_duration = chunk["end"] - chunk["start"]
         if current_segment is None:
             current_segment = {
                 "start": chunk["start"],
                 "end": chunk["end"],
-                "text": chunk["text"].strip()
+                "text": chunk["text"].strip(),
+                # Accumulate durations in a dict: speaker -> total duration
+                "speakers": { chunk["speaker"]: chunk_duration }
             }
         else:
-            #gap = chunk["start"] - current_segment["end"]
+            gap = chunk["start"] - current_segment["end"]
+            same_speaker = (chunk["speaker"] in current_segment["speakers"])
             ends_strong = current_segment["text"] and current_segment["text"][-1] in ".!?"
-            # Merge if within the allowed gap and the current segment hasn't ended with strong punctuation.
-            if not ends_strong:
+            if (same_speaker or (allow_cross_speaker_merge and gap < cross_speaker_gap_threshold)) and not ends_strong:
                 current_segment["text"] += " " + chunk["text"].strip()
                 current_segment["end"] = chunk["end"]
+                current_segment["speakers"][chunk["speaker"]] = current_segment["speakers"].get(chunk["speaker"], 0) + chunk_duration
             else:
                 merged_segments.append(current_segment)
                 current_segment = {
                     "start": chunk["start"],
                     "end": chunk["end"],
-                    "text": chunk["text"].strip()
+                    "text": chunk["text"].strip(),
+                    "speakers": { chunk["speaker"]: chunk_duration }
                 }
-            # If the current segment now ends with a terminal punctuation, finalize it.
             if current_segment and current_segment["text"] and current_segment["text"][-1] in ".!?":
                 merged_segments.append(current_segment)
                 current_segment = None
@@ -83,10 +87,14 @@ def split_segments_with_pysbd(merged_segments):
     final_segments = []
     segmenter = pysbd.Segmenter(language="ru", clean=False)
     for seg in merged_segments:
+        if "speakers" in seg and seg["speakers"]:
+            final_speaker = max(seg["speakers"].items(), key=lambda item: item[1])[0]
+        else:
+            final_speaker = seg.get("speaker", "Unknown")
         sentences = segmenter.segment(seg["text"])
         if not sentences:
             final_segments.append({
-                "speaker": None,
+                "speaker": final_speaker,
                 "start": seg["start"],
                 "end": seg["end"],
                 "text": seg["text"]
@@ -98,7 +106,7 @@ def split_segments_with_pysbd(merged_segments):
                 sent_start = seg["start"] + (duration * i / num_sentences)
                 sent_end = seg["start"] + (duration * (i + 1) / num_sentences)
                 final_segments.append({
-                    "speaker": None,
+                    "speaker": final_speaker,
                     "start": sent_start,
                     "end": sent_end,
                     "text": sentence.strip()
@@ -172,107 +180,109 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
 
     def transcript(file_name):
         logging.info(f'=============>started with {file_name}')
-        # Get the transcript from Whisper with word-level timestamps.
         script = whisper_pipe(file_name, return_timestamps='word', generate_kwargs={"language": "russian"})
         logging.info(f'Loaded transcript for {file_name}')
-        
-        # Run diarization on the audio file.
         diarized = diarization_pipeline(file_name)
         logging.debug(diarized)
-        
-        # -----------------------------
-        # Pre-process: sort and deduplicate Whisper chunks.
-        # -----------------------------
-        pre_chunks = sorted(
-            script['chunks'],
+        speaker_transcription = []
+
+        pre_chunks = sorted(script['chunks'], 
             key=lambda x: (
                 x['timestamp'][0] if x['timestamp'][0] is not None else float('inf'),
-                x['timestamp'][1] if x['timestamp'][1] is not None else float('inf')
-            )
-        )
+                x['timestamp'][1] if x['timestamp'][1] is not None else float('inf')        
+        ))
         chunks = deduplicate(pre_chunks)
-        
-        # Build a list of transcription chunks.
-        # Here we simply set a default speaker value ("Not Defined") as we won't use it later.
-        transcribed = []
+            
         for chunk in chunks:
             start_time = chunk["timestamp"][0] if chunk["timestamp"][0] is not None else float('inf')
             end_time = chunk["timestamp"][1] if chunk["timestamp"][1] is not None else float('inf')
-            transcribed.append({
+            speaker = "Unknown"
+            for turn, _, speaker_label in diarized.itertracks(yield_label=True):
+                start = max(start_time, turn.start)
+                end = min(end_time, turn.end)
+                if start <= end:
+                    speaker = speaker_label
+                    break
+            speaker_transcription.append({
                 "start": start_time,
                 "end": end_time,
-                "text": chunk["text"].strip(),
-                "speaker": None  # Default; will be replaced later.
+                "speaker": speaker,
+                "text": chunk["text"]
             })
-        
-        # -----------------------------
-        # Step 1: Merge Whisper words into sentences.
-        # (We keep your existing merging and PySBD splitting as is.)
-        # -----------------------------
-        merged_segments = merge_chunks_into_sentences(transcribed)
-        sentences = split_segments_with_pysbd(merged_segments)
-        
-        # -----------------------------
-        # Step 2 & 3: For each sentence, collect overlapping diarization blocks
-        # and assign the speaker with the maximum total intersection duration.
-        # -----------------------------
-        for sentence in sentences:
-            sent_start = sentence["start"]
-            sent_end = sentence["end"]
-            overlapping_turns = []
+        logging.debug(speaker_transcription)
+        transcribed = []
+        for segment in speaker_transcription:
+            transcribed.append({
+                "start": segment["start"],
+                "end": segment["end"],
+                "text": segment["text"],
+                "speaker": segment["speaker"] if 'speaker' in segment else "ND"
+            })
+        logging.debug(transcribed)
+
+        # Merge chunks using relaxed merging with accumulated speaker durations.
+        merged = merge_chunks_into_sentences(transcribed, allow_cross_speaker_merge=True, cross_speaker_gap_threshold=0.3)
+        # Further split merged segments into final sentences using PySBD, and then assign final speaker by majority.
+        final_segments = split_segments_with_pysbd(merged)
+        for seg in final_segments:
+            seg_start = seg["start"]
+            seg_end = seg["end"]
+            intersecting_turns = []
+            # Iterate over diarized segments (using itertracks with labels)
             for turn, _, speaker_label in diarized.itertracks(yield_label=True):
-                if sent_start < turn.end and sent_end > turn.start:
-                    overlapping_turns.append({
+                # Check for intersection: if the final segment's interval overlaps with the diarized turn.
+                if seg_start < turn.end and seg_end > turn.start:
+                    intersecting_turns.append({
                         "speaker": speaker_label,
                         "start": turn.start,
                         "end": turn.end
                     })
-            sentence["diarized_segments"] = overlapping_turns
+            # Add the list of intersecting diarized segments to the final segment.
+            seg["diarized_segments"] = intersecting_turns
 
-            # Compute intersection durations per speaker.
+            # Compute the intersection duration for each speaker.
             speaker_durations = {}
-            for turn in overlapping_turns:
-                intersection_start = max(sent_start, turn["start"])
-                intersection_end = min(sent_end, turn["end"])
+            for turn in intersecting_turns:
+                # Calculate the intersection duration between the final segment and the diarized turn.
+                intersection_start = max(seg_start, turn["start"])
+                intersection_end = min(seg_end, turn["end"])
                 duration = intersection_end - intersection_start
                 if duration > 0:
                     speaker = turn["speaker"]
                     speaker_durations[speaker] = speaker_durations.get(speaker, 0) + duration
 
-            # Assign speaker based on maximum intersection duration.
+            # Choose the speaker with the maximum intersection duration.
             if speaker_durations:
-                sentence["speaker"] = max(speaker_durations.items(), key=lambda item: item[1])[0]
+                real_speaker = max(speaker_durations.items(), key=lambda item: item[1])[0]
             else:
-                sentence["speaker"] = "Unknown"
-        
-        # -----------------------------
-        # Step 4: Merge consecutive sentences with the same speaker into blocks.
-        # -----------------------------
-        sentences.sort(key=lambda s: s["start"])
-        merged_sentences = []
-        if sentences:
-            current_sentence = sentences[0]
-            for s in sentences[1:]:
-                if s["speaker"] == current_sentence["speaker"]:
-                    # Extend the current sentence block.
-                    current_sentence["end"] = s["end"]
-                    current_sentence["text"] += " " + s["text"]
-                    # Optionally merge diarized segments.
-                    current_sentence["diarized_segments"].extend(s.get("diarized_segments", []))
+                real_speaker = seg.get("speaker", "Unknown")
+            seg["speaker"] = real_speaker
+       
+       # Merge consecutive segments with the same REAL_SPEAKER into one block.
+        merged_final_segments = []
+        if final_segments:
+            # Ensure final_segments are sorted by start time.
+            final_segments.sort(key=lambda seg: seg["start"])
+            current_seg = final_segments[0]
+            for seg in final_segments[1:]:
+                if seg["speaker"] == current_seg["speaker"]:
+                    # Extend the current segment.
+                    current_seg["end"] = seg["end"]
+                    current_seg["text"] += " " + seg["text"]
+                    # Optionally, merge the diarized_segments.
+                    current_seg["diarized_segments"].extend(seg["diarized_segments"])
                 else:
-                    merged_sentences.append(current_sentence)
-                    current_sentence = s
-            merged_sentences.append(current_sentence)
-        else:
-            merged_sentences = sentences
+                    merged_final_segments.append(current_seg)
+                    current_seg = seg
+            merged_final_segments.append(current_seg)
 
-        # -----------------------------
-        # Save the final transcript to file.
-        # -----------------------------
+        # Replace final_segments with the merged segments.
+        final_segments = merged_final_segments
+
         trans_folder = os.path.join(os.path.dirname(file_name), 'transcripts/')
         os.makedirs(trans_folder, exist_ok=True)
         trans_file = os.path.join(trans_folder, f"{os.path.splitext(os.path.basename(file_name))[0]}.txt")
-        text = save_speech_to_file_with_indent(merged_sentences, trans_file)
+        text = save_speech_to_file_with_indent(final_segments, trans_file)
         logging.info(f'<=============Done with {file_name}')
         return text
 
