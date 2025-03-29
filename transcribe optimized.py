@@ -276,8 +276,6 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         logging.info(f'<=============Done with {file_name}')
         return text
 
-
-
     return transcript
 
 def transcribe(audio_name, transcriptor):
