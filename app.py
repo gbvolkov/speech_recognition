@@ -137,7 +137,8 @@ def create_app():
                 speaker = match.group('speaker').strip()
                 time = match.group('time').strip()
                 colon = match.group('colon')
-                return f"<b>{speaker}</b> <i>{time}</i>{colon}"
+                return f'<b class="speaker-name">{speaker}</b> <i>{time}</i>{colon}'                
+                #return f"<b>{speaker}</b> <i>{time}</i>{colon}"
             formatted_text = pattern.sub(replacer, text)
             
             # Instead of replacing newlines with <br/>, wrap each non-empty line in <p> tags.
@@ -148,7 +149,8 @@ def create_app():
         formatted_transcript = preformat_transcript(transcript)
         # Extract speakers for renaming (if needed)
         import re
-        speakers = re.findall(r'(SPEAKER_\d+|UNKNOWN)', transcript)
+        #speakers = re.findall(r'(SPEAKER_\d+|UNKNOWN)', transcript)
+        speakers = re.findall(r'\*\*(.*?)\*\*', transcript)
         speakers = list(set(speakers))
         return render_template("editor.html", transcript=formatted_transcript, speakers=speakers)
 
@@ -189,4 +191,4 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=False, host="0.0.0.0")
+    app.run(debug=True, host="0.0.0.0")

@@ -11,7 +11,7 @@
 /* Quill editor container */
 #editor-container {
     width: 100%;       /* Fill the entire width of #editorForm */
-    height: 75vh;      /* Editor height is 60% of the viewport */
+    height: 60vh;      /* Editor height is 60% of the viewport */
     border: 1px solid #ccc;
     margin-bottom: 10px;
 }

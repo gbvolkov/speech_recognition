@@ -19,8 +19,10 @@ toggleRenameSidebarBtn.onclick = function() {
     renameSidebar.classList.toggle("active");
 };
   
-// Apply renaming and hide the sidebar after applying changes
+// Apply renaming and hide the sidebar after applying changess
 applyRenameBtn.onclick = function() {
     applyRename(); // Provided by rename.js
     renameSidebar.classList.remove("active");
+    updateSpeakerList();  // Refresh the list of speakers in the sidebar
 };
+

@@ -123,7 +123,7 @@ def save_speech_to_file_with_indent(segments, filename):
         for segment in segments:
             # Format the timestamp as [HH:MM:SS - HH:MM:SS]
             timestamp_tag = f"[{format_timestamp(segment['start'])} - {format_timestamp(segment['end'])}]"
-            speaker_tag = f"{segment['speaker'].upper()} {timestamp_tag}:\n"
+            speaker_tag = f"**{segment['speaker'].upper()}** {timestamp_tag}:\n"
             wrapped_text = textwrap.fill(segment["text"], width=128, subsequent_indent="    ")
             text += speaker_tag + wrapped_text + "\n\n"
             file.write(speaker_tag)
@@ -311,6 +311,11 @@ def move_to_done(filename):
     os.rename(filename, dest_path)
    
 def run_transcription(file_name):
+    if os.path.isfile("./audio/transcripts/debug.txt"):
+        with open("./audio/transcripts/debug.txt", "r", encoding="utf-8") as f:
+            transcription_text=f.read()
+        return transcription_text
+    
     from pathlib import Path
     logging.basicConfig(level=logging.INFO)
 
