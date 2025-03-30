@@ -127,3 +127,7 @@ border-radius: 0; /* Square corners, as inspired by the provided styles */
     margin: 0 auto;       /* Centers horizontally if width less than 100% */
     overflow: auto;       /* optional, if content overflows */
 }
+
+.hidden-block {
+    display: none;
+}

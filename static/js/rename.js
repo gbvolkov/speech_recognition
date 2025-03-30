@@ -50,4 +50,27 @@ function updateSpeakerList() {
         label.appendChild(input);
         innerDiv.appendChild(label);
     });
+    setupSpeakerInputEvents();
 }
+
+function setupSpeakerInputEvents() {
+    const inputs = document.querySelectorAll('#renameForm input[type="text"]');
+    inputs.forEach(input => {
+      input.addEventListener('focus', function() {
+        // When an input is focused, filter the editor for this speaker
+        const speakerName = input.name;  // e.g., "Андрей Васильев"
+        filterEditorContent(speakerName);
+        //alert(speakerName)
+      });
+      input.addEventListener('blur', function() {
+        // Use a small delay to allow focus to shift to another input,
+        // otherwise, restore full content if focus left the rename form.
+        setTimeout(() => {
+          if (!document.querySelector('#renameForm input:focus')) {
+            restoreEditorContent();
+          }
+        }, 100);
+      });
+    });
+  }
+  

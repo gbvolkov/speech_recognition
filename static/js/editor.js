@@ -46,5 +46,35 @@ document.addEventListener('DOMContentLoaded', function() {
         }
       });
     });
+    setupSpeakerInputEvents();
   });
+
+  function filterEditorContent(speakerName) {
+    const editor = document.querySelector('.ql-editor');
+    let currentSpeaker = null;
+    
+    // Iterate over each paragraph block in order.
+    editor.querySelectorAll('p').forEach(block => {
+      // Check if this block starts with a speaker header.
+      const strongElem = block.querySelector('strong');
+      if (strongElem) {
+        // Remove markdown asterisks and extra whitespace.
+        const nameText = strongElem.textContent.replace(/\*\*/g, '').trim();
+        currentSpeaker = nameText;
+      }
+      // If the current speaker matches the one being filtered, show the block; otherwise hide it.
+      if (currentSpeaker === speakerName) {
+        block.classList.remove('hidden-block');
+      } else {
+        block.classList.add('hidden-block');
+      }
+    });
+  }
+  
+  function restoreEditorContent() {
+    const editor = document.querySelector('.ql-editor');
+    editor.querySelectorAll('.hidden-block').forEach(block => {
+      block.classList.remove('hidden-block');
+    });
+  }
   
