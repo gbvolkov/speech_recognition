@@ -57,7 +57,15 @@
 
   <!-- Speaker Rename Sidebar -->
   <div id="renameSidebar" class="rename-sidebar">
-    <h3>Rename Speakers</h3>
+    <div class="reload-header">
+      <h3>Rename Speakers</h3>
+      <button type="button" 
+        onclick="document.getElementById('format').value='word'; updateSpeakerList();"
+        class="reload-btn"
+        title="Reload speakers">
+        <img src="{{ url_for('static', filename='icons/icons8-reload-50.svg') }}" alt="Reload speakers" />
+      </button>
+    </div>
     <form id="renameForm" class="rename-form">
       <div class="inner-div">
         {% for speaker in speakers %}
