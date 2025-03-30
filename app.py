@@ -10,7 +10,19 @@ from transcribe import run_transcription
 import html2text  # For HTML-to-Markdown conversion
 
 # Allowed audio file extensions
-ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'm4a', 'flac'}
+
+#ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'aiff', 'avi', 'mp4', 'mov', 'mkv', 'webm', 'mpg'}
+
+ALLOWED_EXTENSIONS = {
+    # Audio-only containers:
+    'aac', 'aax', 'aa', 'ac3', 'ac4', 'aiff', 'au', 'caf', 'flac',
+    'mp2', 'mp3', 'ogg', 'opus', 'wav', 'w64', 'wv', 'tta', 'ape',
+    'm4a', 'wma', 'ads',
+    # Video containers (if they contain audio):
+    'avi', 'mp4', 'mov', 'mpeg', 'mpg', 'ts', 'mkv', 'flv', 'webm',
+    '3gp', '3g2', 'mxf', 'vob', 'rm', 'swf', 'm4v', 'ismv', 'nut',
+    'asf', 'matroska', 'ogv'
+}
 
 def allowed_file(filename):
     """Check if the file has a valid audio extension."""
