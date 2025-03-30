@@ -26,3 +26,25 @@ applyRenameBtn.onclick = function() {
     updateSpeakerList();  // Refresh the list of speakers in the sidebar
 };
 
+document.addEventListener('DOMContentLoaded', function() {
+    // Select all text inputs in the rename form
+    const renameInputs = document.querySelectorAll('#renameForm input[type="text"]');
+    
+    renameInputs.forEach(input => {
+      // Prevent keypress if the key is an asterisk
+      input.addEventListener('keypress', function(e) {
+        if (e.key === '*') {
+          e.preventDefault();
+        }
+      });
+      
+      // Prevent pasting if the pasted content contains an asterisk
+      input.addEventListener('paste', function(e) {
+        const pasteData = e.clipboardData.getData('text');
+        if (pasteData.includes('*')) {
+          e.preventDefault();
+        }
+      });
+    });
+  });
+  
