@@ -61,11 +61,11 @@
   form {
     background-color: #fff;
     padding: 30px;
-    border: 1px solid #ddd;
+    /*border: 1px solid #ddd;*/
     margin: 20px auto;
     max-width: 600px;
     border-radius: 0; /* Square corners, as inspired by the provided styles */
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    /*box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);*/
   }
   
   /* Input Fields */

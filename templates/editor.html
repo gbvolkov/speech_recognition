@@ -1,72 +1,87 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transcript Editor</title>
-
-    <!-- Original Styles -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/editor.css') }}">
-
-    <!-- Quill CSS -->
-    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+  <meta charset="UTF-8">
+  <title>Transcript Editor</title>
+  <!-- Base styles -->
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/style.css') }}">
+  <!-- Editor-specific styles -->
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/editor.css') }}">
+  <!-- Quill CSS -->
+  <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
 </head>
 <body>
+  <h1>Transcript Editor</h1>
 
-<div id="editor-container">
-    <h1 class="page-title">Transcript Editor</h1>
-    <div id="editor"></div>
-
-    <!-- Action Buttons (original styling) -->
-    <div class="editor-actions">
-        <div class="left-actions">
-            <button type="button" id="toggleRenameSidebar" class="download-btn" title="Rename Speakers">
-                <img src="{{ url_for('static', filename='icons/icons8-edit-64.svg') }}" alt="Rename" />
-            </button>
-        </div>
-        <div class="right-actions">
-            <button id="download-markup" class="download-btn" title="Download as Markup">
-                <img src="{{ url_for('static', filename='icons/icons8-markdown-50-_1_.svg') }}" alt="Download Markdown" />
-            </button>
-            <button id="download-word" class="download-btn" title="Download as Word Doc">
-                <img src="{{ url_for('static', filename='icons/icons8-word-50.svg') }}" alt="Download Word Document" />
-            </button>
-        </div>
+  <!-- The form for the editor -->
+  <form id="editorForm" method="post" action="/download">
+    <!-- Quill editor container -->
+    <div>
+      <div id="editor-container"></div>
     </div>
-</div>
 
-<!-- Sidebar for Speaker Renaming -->
-<div id="renameSidebar" class="rename-sidebar">
-    <h3>Rename Speakers</h3>
-    <form id="renameForm">
-        {% for speaker in speakers %}
-            <label>{{ speaker }}:
-                <input type="text" name="{{ speaker }}" placeholder="Enter real name">
-            </label>
-        {% endfor %}
-        <button type="button" id="applyRenameBtn" class="button-primary">Apply</button>
-    </form>
-</div>
-
-<!-- Quill JS -->
-<script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
-
-<!-- Transcript Content -->
-<script>
-    var transcriptContent = `{{ transcript|safe }}`;
-</script>
-
-<!-- Original JS Logic -->
-<script src="{{ url_for('static', filename='js/rename.js') }}"></script>
-<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
-
-
-<!-- Hidden form for submission -->
-<form id="editorForm" method="post" action="/download" style="display:none;">
+    <!-- Hidden fields to hold transcript data for download -->
     <input type="hidden" name="html_content" id="html_content">
     <input type="hidden" name="format" id="format" value="markup">
-</form>
 
+    <!-- Action buttons container -->
+    <div class="editor-actions">
+      <!-- Left side: Rename button -->
+      <div class="left-actions">
+        <button type="button"
+                id="toggleRenameSidebar"
+                class="download-btn"
+                title="Rename Speakers">
+          <img src="{{ url_for('static', filename='icons/icons8-edit-64.svg') }}" alt="Rename" />
+        </button>
+      </div>
+      <!-- Right side: Download buttons -->
+      <div class="right-actions">
+        <!-- Download as Markup -->
+        <button type="submit"
+                onclick="document.getElementById('format').value='markup'; updateEditorContent();"
+                class="download-btn"
+                title="Download as Markup">
+          <img src="{{ url_for('static', filename='icons/icons8-markdown-50-_1_.svg') }}" alt="Download Markdown" />
+        </button>
+        <!-- Download as Word -->
+        <button type="submit"
+                onclick="document.getElementById('format').value='word'; updateEditorContent();"
+                class="download-btn"
+                title="Download as Word Doc">
+          <img src="{{ url_for('static', filename='icons/icons8-word-50.svg') }}" alt="Download Word Document" />
+        </button>
+      </div>
+    </div>
+  </form>
+
+  <!-- Speaker Rename Sidebar -->
+  <div id="renameSidebar" class="rename-sidebar">
+    <h3>Rename Speakers</h3>
+    <form id="renameForm" class="rename-form">
+      <div class="inner-div">
+        {% for speaker in speakers %}
+          <label>{{ speaker }}:
+            <input type="text" name="{{ speaker }}" placeholder="Enter real name">
+          </label>
+        {% endfor %}
+      </div>
+      <button type="button" id="applyRenameBtn" class="button-primary">Apply</button>
+    </form>
+  </div>
+
+  <!-- Quill JS -->
+  <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+
+  <!-- rename.js: contains applyRename() -->
+  <script src="{{ url_for('static', filename='js/rename.js') }}"></script>
+
+  <!-- Pass transcript from Flask to JavaScript -->
+  <script>
+    var transcriptContent = `{{ transcript|safe }}`;
+  </script>
+
+  <!-- Editor initialization & sidebar logic -->
+  <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
 </body>
 </html>

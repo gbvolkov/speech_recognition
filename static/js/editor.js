@@ -1,33 +1,26 @@
-// Initialize Quill editor with provided transcript content
-var quill = new Quill('#editor', {
+// Initialize Quill editor with the transcript content
+var quill = new Quill('#editor-container', {
     theme: 'snow'
 });
 quill.root.innerHTML = transcriptContent;
-
-// Sidebar toggle functionality
-document.getElementById("toggleRenameSidebar").onclick = function() {
-    document.getElementById("renameSidebar").classList.toggle("active");
-};
-
-// Apply renaming functionality (from rename.js)
-document.getElementById("applyRenameBtn").onclick = function() {
-    applyRename();
-    document.getElementById("renameSidebar").classList.remove("active");
-};
-
-// Helper function to submit content for download
-function downloadContent(format) {
-    const form = document.getElementById('editorForm');
-    document.getElementById('html_content').value = quill.root.innerHTML;
-    document.getElementById('format').value = format;
-    form.submit();
+  
+// Update hidden input before form submission
+function updateEditorContent() {
+    document.getElementById("html_content").value = quill.root.innerHTML;
 }
-
-// Event listeners for download buttons
-document.getElementById('download-markup').onclick = function() {
-    downloadContent('markup');
+  
+// Sidebar handling for speaker renaming
+var toggleRenameSidebarBtn = document.getElementById("toggleRenameSidebar");
+var renameSidebar = document.getElementById("renameSidebar");
+var applyRenameBtn = document.getElementById("applyRenameBtn");
+  
+// Toggle the sidebar on button click
+toggleRenameSidebarBtn.onclick = function() {
+    renameSidebar.classList.toggle("active");
 };
-
-document.getElementById('download-word').onclick = function() {
-    downloadContent('word');
+  
+// Apply renaming and hide the sidebar after applying changes
+applyRenameBtn.onclick = function() {
+    applyRename(); // Provided by rename.js
+    renameSidebar.classList.remove("active");
 };
