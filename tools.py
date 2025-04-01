@@ -43,5 +43,5 @@ def extract_wav_segment(input_file, output_file, start_time, duration):
 
 if __name__ == "__main__":
     # Example usage:
-    extract_wav_segment("./audio/audio1092719758.wav", "./audio/audio1092719758_segment1.wav", start_time=27, duration=20)
+    extract_wav_segment("./audio/audio1092719758.wav", "./audio/audio1092719758_segment2.wav", start_time=27, duration=57)
 

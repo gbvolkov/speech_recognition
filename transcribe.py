@@ -150,6 +150,8 @@ def deduplicate(chunked_script):
             start = min(deduplicated[-1]['timestamp'][0], chunk['timestamp'][0])
             end = max(deduplicated[-1]['timestamp'][1], chunk['timestamp'][1])
             deduplicated[-1]['timestamp'] = (start, end)
+        else:
+            print("Skipping duplicate chunk:", chunk)
     return deduplicated
 
 def transcription_factory(whisper_model_id, diarization_model_id, align_model_id=None):
@@ -169,8 +171,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         model=whisper_model,
         tokenizer=whisper_processor.tokenizer,
         feature_extractor=whisper_processor.feature_extractor,
-        chunk_length_s=30,
-        stride_length_s=10,
+        chunk_length_s=10,
+        stride_length_s=3,
         torch_dtype=torch_dtype,
         device=device,
     )
@@ -199,7 +201,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
                 x['timestamp'][1] if x['timestamp'][1] is not None else float('inf')
             )
         )
-        chunks = deduplicate(pre_chunks)
+        chunks = pre_chunks
+        # chunks = deduplicate(pre_chunks)
         
         # Build a list of transcription chunks.
         # Here we simply set a default speaker value ("Not Defined") as we won't use it later.
