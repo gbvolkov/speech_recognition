@@ -201,8 +201,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
                 x['timestamp'][1] if x['timestamp'][1] is not None else float('inf')
             )
         )
-        chunks = pre_chunks
-        # chunks = deduplicate(pre_chunks)
+        #chunks = pre_chunks
+        chunks = deduplicate(pre_chunks)
         
         # Build a list of transcription chunks.
         # Here we simply set a default speaker value ("Not Defined") as we won't use it later.
