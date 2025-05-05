@@ -171,8 +171,8 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         model=whisper_model,
         tokenizer=whisper_processor.tokenizer,
         feature_extractor=whisper_processor.feature_extractor,
-        chunk_length_s=10,
-        stride_length_s=3,
+        chunk_length_s=30,
+        stride_length_s=5,
         torch_dtype=torch_dtype,
         device=device,
     )
