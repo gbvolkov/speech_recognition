@@ -202,5 +202,9 @@ def create_app():
     return app
 
 if __name__ == "__main__":
+    import os
+    pid = os.getpid()
+    with open(".process", "w") as f:
+        f.write(f"{pid}")
     app = create_app()
     app.run(debug=False, host="0.0.0.0")

@@ -10,6 +10,7 @@ __pycache__/
 ffmpeg
 ffplay
 ffprobe
+.process
 *.exe
 hf.txt
 nohup.out

@@ -15,6 +15,7 @@ from pydub import AudioSegment
 
 import textwrap
 import logging
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s — %(levelname)s — %(message)s")
 
 # Import PySBD for rule-based sentence segmentation.
 import pysbd
@@ -23,6 +24,7 @@ LOCAL_MODEL = False
 
 import gc
 import torch
+
 
 def cleanup_gpu_memory():
     """Clean up GPU memory by running garbage collection and clearing CUDA cache."""
@@ -156,16 +158,21 @@ def deduplicate(chunked_script):
 
 def transcription_factory(whisper_model_id, diarization_model_id, align_model_id=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    #device = "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
     logging.info(device)
 
     # Initialize Whisper pipeline.
-    whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        whisper_model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
-    )
-    whisper_model.config.forced_decoder_ids = None
-    whisper_model.to(device)
-    whisper_processor = AutoProcessor.from_pretrained(whisper_model_id)
+    try:
+        whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            whisper_model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
+        )
+        whisper_model.config.forced_decoder_ids = None
+        whisper_model.to(device)
+        whisper_processor = AutoProcessor.from_pretrained(whisper_model_id, token=HF_TOKEN)
+    except Exception as e:
+        logging.error(f"{e}")
+        raise e
     whisper_pipe = pipeline(
         "automatic-speech-recognition",
         model=whisper_model,
