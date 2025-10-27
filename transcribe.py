@@ -12,6 +12,7 @@ import torch
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 from pyannote.audio import Pipeline
 from pydub import AudioSegment
+from pydub.exceptions import CouldntDecodeError
 
 import textwrap
 import logging
@@ -135,9 +136,18 @@ def save_speech_to_file_with_indent(segments, filename):
 
 def convert_audio_to_wav(input_file, output_file, audio_type):
     """
-    Converts an M4A (or similar) file to WAV format.
+    Convert an audio file to WAV, auto-detecting the container first and
+    falling back to the provided audio type if required.
     """
-    audio = AudioSegment.from_file(input_file, format=audio_type)
+    try:
+        audio = AudioSegment.from_file(input_file)
+    except CouldntDecodeError as auto_err:
+        logging.warning(f"Auto-detect failed for '{input_file}': {auto_err}. Retrying with format='{audio_type}'.")
+        try:
+            audio = AudioSegment.from_file(input_file, format=audio_type)
+        except Exception as e:
+            logging.error(f"Failed to convert '{input_file}' to WAV using format='{audio_type}': {e}")
+            raise e
     audio.export(output_file, format='wav')
     logging.info(f"Successfully converted '{input_file}' to '{output_file}'")
 
