@@ -1,30 +1,46 @@
-import math
-from transformers.models.whisper import tokenization_whisper
-
 with open('hf.txt') as f:
-    HF_TOKEN = f.read()
+    HF_TOKEN = f.read().strip()
 
-import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import shutil
+import subprocess
 
 import torch
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
-from pyannote.audio import Pipeline
-from pydub import AudioSegment
-from pydub.exceptions import CouldntDecodeError
+
+
+def _configure_ffmpeg_runtime():
+    """Make FFmpeg DLLs discoverable on Windows before torchcodec/pyannote import."""
+    if os.name != "nt":
+        return
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        return
+
+    ffmpeg_bin = os.path.dirname(ffmpeg_path)
+    current_path = os.environ.get("PATH", "")
+    if ffmpeg_bin not in current_path.split(os.pathsep):
+        os.environ["PATH"] = f"{ffmpeg_bin}{os.pathsep}{current_path}" if current_path else ffmpeg_bin
+
+    if hasattr(os, "add_dll_directory"):
+        try:
+            os.add_dll_directory(ffmpeg_bin)
+        except OSError:
+            # PATH update above is still useful if this fails.
+            pass
+
+
+_configure_ffmpeg_runtime()
 
 import textwrap
 import logging
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s — %(levelname)s — %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Import PySBD for rule-based sentence segmentation.
 import pysbd
 
-LOCAL_MODEL = False
-
 import gc
-import torch
 
 
 def cleanup_gpu_memory():
@@ -134,22 +150,88 @@ def save_speech_to_file_with_indent(segments, filename):
             file.write("\n\n")
         return text
 
-def convert_audio_to_wav(input_file, output_file, audio_type):
-    """
-    Convert an audio file to WAV, auto-detecting the container first and
-    falling back to the provided audio type if required.
-    """
+def convert_audio_to_wav(input_file, output_file, audio_type=None):
+    """Convert an audio file to WAV using FFmpeg CLI (works on Python 3.13+)."""
+    ffmpeg_exe = shutil.which("ffmpeg")
+    if ffmpeg_exe is None:
+        raise RuntimeError(
+            "ffmpeg is not available in PATH. Install FFmpeg and ensure `ffmpeg` command is resolvable."
+        )
+
+    command = [
+        ffmpeg_exe,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        input_file,
+        output_file,
+    ]
+
     try:
-        audio = AudioSegment.from_file(input_file)
-    except CouldntDecodeError as auto_err:
-        logging.warning(f"Auto-detect failed for '{input_file}': {auto_err}. Retrying with format='{audio_type}'.")
-        try:
-            audio = AudioSegment.from_file(input_file, format=audio_type)
-        except Exception as e:
-            logging.error(f"Failed to convert '{input_file}' to WAV using format='{audio_type}': {e}")
-            raise e
-    audio.export(output_file, format='wav')
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").strip()
+        logging.error(f"Failed to convert '{input_file}' to WAV with ffmpeg. {stderr}")
+        raise RuntimeError(f"FFmpeg conversion failed for '{input_file}': {stderr}") from e
+
     logging.info(f"Successfully converted '{input_file}' to '{output_file}'")
+
+def _assert_runtime_dependencies():
+    """
+    Fail fast when required runtime dependencies are not correctly installed.
+    No fallback behavior is allowed.
+    """
+    ffmpeg_exe = shutil.which("ffmpeg")
+    if ffmpeg_exe is None:
+        raise RuntimeError(
+            "Missing dependency: FFmpeg is not available in PATH.\n"
+            "Install instructions:\n"
+            "1. Install FFmpeg full-shared build for Windows.\n"
+            "2. Add FFmpeg bin directory to PATH.\n"
+            "3. Restart terminal/IDE and re-run."
+        )
+
+    ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+    ffmpeg_shared_dlls = [
+        name for name in os.listdir(ffmpeg_dir)
+        if name.lower().endswith(".dll") and (name.lower().startswith("av") or name.lower().startswith("sw"))
+    ]
+    if not ffmpeg_shared_dlls:
+        raise RuntimeError(
+            "Incompatible FFmpeg install detected: static build without shared DLLs.\n"
+            f"Detected ffmpeg executable: {ffmpeg_exe}\n"
+            "Install instructions:\n"
+            "1. Install FFmpeg full-shared build for Windows (not full_build/static).\n"
+            "2. Ensure ffmpeg bin folder contains files like avcodec-*.dll / avutil-*.dll.\n"
+            "3. Put that bin folder first in PATH.\n"
+            "4. Restart terminal/IDE and re-run."
+        )
+
+    try:
+        import torchcodec  # noqa: F401
+    except Exception as e:
+        root_error = str(e).splitlines()[0] if str(e) else repr(e)
+        raise RuntimeError(
+            "Missing or broken dependency: torchcodec could not be loaded.\n"
+            "Install instructions:\n"
+            "1. Install FFmpeg full-shared build and ensure its DLLs are on PATH.\n"
+            "2. Install compatible versions of torch, torchaudio, and torchcodec:\n"
+            "   uv add \"torch==2.10.0\" \"torchaudio==2.10.0\" \"torchcodec==0.10.0\"\n"
+            "3. Verify compatibility table:\n"
+            "   https://github.com/pytorch/torchcodec?tab=readme-ov-file#installing-torchcodec\n"
+            "4. Recreate venv and reinstall dependencies if needed.\n"
+            f"Original error: {root_error}"
+        ) from None
+
+
+def _load_diarization_pipeline(diarization_model_id, token):
+    """Load diarization pipeline using the current pyannote API."""
+    from pyannote.audio import Pipeline
+    return Pipeline.from_pretrained(diarization_model_id, token=token)
+
 
 def deduplicate(chunked_script):
     deduplicated = []
@@ -166,7 +248,9 @@ def deduplicate(chunked_script):
             print("Skipping duplicate chunk:", chunk)
     return deduplicated
 
-def transcription_factory(whisper_model_id, diarization_model_id, align_model_id=None):
+def transcription_factory(whisper_model_id, diarization_model_id):
+    _assert_runtime_dependencies()
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     #device = "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
@@ -190,23 +274,24 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
         feature_extractor=whisper_processor.feature_extractor,
         chunk_length_s=30,
         stride_length_s=5,
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         device=device,
     )
 
-    diarization_pipeline = Pipeline.from_pretrained(diarization_model_id, use_auth_token=HF_TOKEN)
+    diarization_pipeline = _load_diarization_pipeline(diarization_model_id, HF_TOKEN)
     if torch.cuda.is_available():
         diarization_pipeline.to(torch.device("cuda"))
 
     def transcript(file_name):
         logging.info(f'=============>started with {file_name}')
         # Get the transcript from Whisper with word-level timestamps.
-        script = whisper_pipe(file_name, return_timestamps='word', generate_kwargs={"language": "russian"})
+        script = whisper_pipe(file_name, return_timestamps='word', generate_kwargs={"language": "ru"})
         logging.info(f'Loaded transcript for {file_name}')
         
         # Run diarization on the audio file.
-        diarized = diarization_pipeline(file_name)
-        logging.debug(diarized)
+        diarized_result = diarization_pipeline(file_name)
+        logging.debug(diarized_result)
+        diarized = diarized_result.speaker_diarization
         
         # -----------------------------
         # Pre-process: sort and deduplicate Whisper chunks.
@@ -249,7 +334,7 @@ def transcription_factory(whisper_model_id, diarization_model_id, align_model_id
             sent_start = sentence["start"]
             sent_end = sentence["end"]
             overlapping_turns = []
-            for turn, _, speaker_label in diarized.itertracks(yield_label=True):
+            for turn, speaker_label in diarized:
                 if sent_start < turn.end and sent_end > turn.start:
                     overlapping_turns.append({
                         "speaker": speaker_label,
@@ -331,16 +416,9 @@ def move_to_done(filename):
     os.rename(filename, dest_path)
    
 def run_transcription(file_name):
-    if os.path.isfile("./audio/transcripts/debug.txt"):
-        with open("./audio/transcripts/debug.txt", "r", encoding="utf-8") as f:
-            transcription_text=f.read()
-        return transcription_text
-    
-    from pathlib import Path
     logging.basicConfig(level=logging.INFO)
 
-    diarization_model = "pyannote/speaker-diarization-3.1"
-    #align_model = 'jonatasgrosman/wav2vec2-large-xlsr-53-russian'
+    diarization_model = "pyannote/speaker-diarization-community-1"
     whisper_model = "openai/whisper-large-v3"
 
     transcriptor = transcription_factory(whisper_model, diarization_model)
@@ -353,22 +431,19 @@ if __name__ == "__main__":
     from pathlib import Path
     logging.basicConfig(level=logging.INFO)
 
-    diarization_model = "pyannote/speaker-diarization-3.1"
-    align_model = 'jonatasgrosman/wav2vec2-large-xlsr-53-russian'
+    diarization_model = "pyannote/speaker-diarization-community-1"
     whisper_model = "openai/whisper-large-v3"
     
     transcriptor = transcription_factory(whisper_model, diarization_model)
 
     folder_path = './audio/'
-    AUDIO_EXTENSIONS = {'.mp3', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.aiff', '.wav'}
+    AUDIO_EXTENSIONS = {'.mp3', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.aiff', '.wav', '.mp4'}
 
     folder = Path(folder_path)
     for file in folder.iterdir():
         if file.is_file() and file.suffix.lower() in AUDIO_EXTENSIONS:
             full_path = file.resolve()
-            audio_type = file.suffix.lower().replace('.', '')
-            logging.info(f"Found audio file: {full_path} (Type: {audio_type})")
-            out_file, _ = os.path.splitext(full_path)
-            out_file = f"{out_file}.wav"        
+            logging.info(f"Found audio file: {full_path}")
             transcribe(str(full_path), transcriptor)
             print(f"<============= Done with {full_path}")
+

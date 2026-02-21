@@ -3,11 +3,8 @@ import re
 import uuid
 import threading
 import queue
-from io import BytesIO
 from flask import Flask, render_template, request, make_response, jsonify
-from docx import Document
 from transcribe import run_transcription
-import html2text  # For HTML-to-Markdown conversion
 
 # Allowed audio file extensions
 
@@ -135,7 +132,6 @@ def create_app():
             return "Transcription is still in progress or not found.", 404
 
         def preformat_transcript(text):
-            import re
             # Collapse multiple newline characters into one.
             text = re.sub(r'\n+', '\n', text)
             
@@ -160,7 +156,6 @@ def create_app():
         
         formatted_transcript = preformat_transcript(transcript)
         # Extract speakers for renaming (if needed)
-        import re
         #speakers = re.findall(r'(SPEAKER_\d+|UNKNOWN)', transcript)
         speakers = re.findall(r'\*\*(.*?)\*\*', transcript)
         speakers = list(set(speakers))
