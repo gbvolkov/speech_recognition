@@ -1,0 +1,27 @@
+{
+  "generated_at_utc": "2026-02-22T08:46:36.705179+00:00",
+  "reference_path": "evaluation\\gold\\dialog_ru_timed.ref.jsonl",
+  "source_script_path": "data\\test_dialog.py",
+  "transcript_source": "audio/transcripts/dialog_ru_timed.txt",
+  "config": {
+    "run_transcription": false,
+    "pipeline": "v2",
+    "profile": "default"
+  },
+  "metrics": {
+    "reference_segment_count": 20,
+    "predicted_segment_count": 19,
+    "utterance_count_delta": -1,
+    "max_segment_duration_sec": 5.0,
+    "start_alignment_median_abs_error_sec": 0.7499999999999982,
+    "start_alignment_mean_abs_error_sec": 2.4611111111111104,
+    "speaker_sequence_accuracy": 0.9,
+    "anchor_hits": 7,
+    "anchor_total": 10,
+    "anchor_recall": 0.7,
+    "false_overlap_before_45_sec": false,
+    "segments_starting_after_43_sec": 8,
+    "wer_optional": 0.43356643356643354
+  },
+  "gate": null
+}

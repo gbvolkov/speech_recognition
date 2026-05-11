@@ -16,3 +16,9 @@ hf.txt
 nohup.out
 /data
 /silero-vad
+evaluation/reports/*.phase*_check.json
+evaluation/reports/*.latest.json
+/.tmp_bench
+/.tmp_bench_test
+/.tmp
+.env
